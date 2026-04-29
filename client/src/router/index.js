@@ -47,16 +47,26 @@ const router = createRouter({
 
 router.beforeEach((to, _from, next) => {
   const auth = useAuthStore()
+
   if (!to.meta.public && !auth.isLoggedIn) {
     return next('/login')
   }
   if (to.path === '/login' && auth.isLoggedIn) {
     return next('/')
   }
-  // Block signup page if account limit reached
-  if (to.path === '/signup' && auth.accountLimitReached) {
-    return next('/login')
+
+  // Section Admin cannot access write-only routes directly
+  if (auth.isLoggedIn && auth.isSectionAdmin) {
+    const writeOnlyRoutes = [
+      '/employees/new',
+      '/departments',
+    ]
+    // Block /employees/:id/edit pattern
+    if (writeOnlyRoutes.includes(to.path) || /^\/employees\/\d+\/edit$/.test(to.path)) {
+      return next('/employees')
+    }
   }
+
   next()
 })
 

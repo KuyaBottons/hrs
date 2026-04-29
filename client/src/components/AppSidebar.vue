@@ -1,11 +1,13 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
+const auth  = useAuthStore()
 
 const props = defineProps({ open: { type: Boolean, default: true } })
-const emit = defineEmits(['toggle'])
+const emit  = defineEmits(['toggle'])
 
 // SVG icon paths — all filled, solid black style
 const icons = {
@@ -33,23 +35,23 @@ const icons = {
   department: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 7V3H2v18h20V7H12zM6 19H4v-2h2v2zm0-4H4v-2h2v2zm0-4H4V9h2v2zm0-4H4V5h2v2zm4 12H8v-2h2v2zm0-4H8v-2h2v2zm0-4H8V9h2v2zm0-4H8V5h2v2zm10 12h-8v-2h2v-2h-2v-2h2v-2h-2V9h8v10zm-2-8h-2v2h2v-2zm0 4h-2v2h2v-2z"/></svg>`,
 }
 
-const menuGroups = [
+const allMenuGroups = [
   {
     label: 'HR Management',
     iconKey: 'hrgroup',
     items: [
-      { label: 'Employee Masterlist', iconKey: 'employees', to: '/employees' },
-      { label: 'Birthday Celebrants', iconKey: 'birthday', to: '/employees/birthdays' },
-      { label: 'Schedule Database', iconKey: 'schedule', to: '/schedule' },
-      { label: 'Trainings', iconKey: 'trainings', to: '/trainings' },
-      { label: 'Departments', iconKey: 'department', to: '/departments' },
+      { label: 'Employee Masterlist', iconKey: 'employees',  to: '/employees' },
+      { label: 'Birthday Celebrants', iconKey: 'birthday',   to: '/employees/birthdays' },
+      { label: 'Schedule Database',   iconKey: 'schedule',   to: '/schedule' },
+      { label: 'Trainings',           iconKey: 'trainings',  to: '/trainings' },
+      { label: 'Departments',         iconKey: 'department', to: '/departments' },
     ],
   },
   {
     label: 'DTR & Transmittal',
     iconKey: 'dtrgroup',
     items: [
-      { label: 'DTR Transmittal', iconKey: 'dtr', to: '/dtr' },
+      { label: 'DTR Transmittal',     iconKey: 'dtr',   to: '/dtr' },
       { label: 'Audit & Transmittal', iconKey: 'audit', to: '/audit' },
     ],
   },
@@ -57,17 +59,17 @@ const menuGroups = [
     label: 'Leave & T.O.',
     iconKey: 'leavegroup',
     items: [
-      { label: 'Leave Management', iconKey: 'leave', to: '/leave' },
-      { label: 'Travel Order (T.O.)', iconKey: 'to', to: '/to' },
+      { label: 'Leave Management',    iconKey: 'leave', to: '/leave' },
+      { label: 'Travel Order (T.O.)', iconKey: 'to',    to: '/to' },
     ],
   },
   {
     label: 'Workflow',
     iconKey: 'workflow',
     items: [
-      { label: 'Verification', iconKey: 'verification', to: '/verification' },
-      { label: 'Tracking & Receiving', iconKey: 'tracking', to: '/tracking' },
-      { label: 'Signatories', iconKey: 'signatories', to: '/signatories' },
+      { label: 'Verification',        iconKey: 'verification', to: '/verification' },
+      { label: 'Tracking & Receiving',iconKey: 'tracking',     to: '/tracking' },
+      { label: 'Signatories',         iconKey: 'signatories',  to: '/signatories' },
     ],
   },
   {
@@ -79,20 +81,25 @@ const menuGroups = [
   },
 ]
 
+// All roles see all groups — Section Admin restrictions are in the UI
+const menuGroups = computed(() => allMenuGroups)
+
 const collapsed = ref({})
-menuGroups.forEach((g, i) => { collapsed.value[i] = false })
+// Initialize collapsed state — watch menuGroups since it's computed
+watchEffect(() => {
+  menuGroups.value.forEach((_, i) => {
+    if (collapsed.value[i] === undefined) collapsed.value[i] = false
+  })
+})
 
 function toggle(i) {
   collapsed.value[i] = !collapsed.value[i]
 }
 
-function isActive(to) {  // Exact match always wins
+function isActive(to) {
   if (route.path === to) return true
-  // Only highlight parent if current path is a sub-route (e.g. /employees/new, /employees/5/edit)
-  // but NOT if another menu item already exactly matches (e.g. /employees/birthdays)
   if (route.path.startsWith(to + '/')) {
-    // Check if any sibling item exactly matches the current path
-    const allItems = menuGroups.flatMap(g => g.items)
+    const allItems = menuGroups.value.flatMap(g => g.items)
     const exactMatch = allItems.find(item => item.to === route.path)
     if (exactMatch) return false
     return true
@@ -223,7 +230,7 @@ const sidebarOpen = ref(true)
   color: rgba(255,255,255,0.75);
   text-decoration: none;
   font-size: 13px;
-  transition: all 0.2s;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.1s ease;
   margin: 1px 8px;
   border-radius: 6px;
 }
@@ -241,6 +248,7 @@ const sidebarOpen = ref(true)
   justify-content: center;
 }
 .nav-item:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.nav-item:active { transform: scale(0.97); background: rgba(255,255,255,0.18); }
 .nav-item.active {
   background: linear-gradient(90deg, #ffd700, #ffb300);
   color: #1a6b3c;

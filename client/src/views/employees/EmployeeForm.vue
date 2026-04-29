@@ -5,9 +5,16 @@ import { useEmployeeStore } from '@/stores/employees'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
-const route = useRoute()
-const store = useEmployeeStore()
-const auth = useAuthStore()
+const route  = useRoute()
+const store  = useEmployeeStore()
+const auth   = useAuthStore()
+
+// Section Admin cannot add or edit employees — redirect back
+onMounted(() => {
+  if (!auth.canEdit('employees')) {
+    router.replace('/employees')
+  }
+})
 
 const isEdit = ref(false)
 const errors = ref({})

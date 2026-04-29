@@ -99,8 +99,7 @@ async function handleLogin() {
         </button>
       </form>
 
-      <!-- Only show if account limit not yet reached -->
-      <div v-if="!auth.accountLimitReached" class="signup-link">
+      <div class="signup-link">
         Don't have an account?
         <router-link to="/signup">Create one →</router-link>
       </div>

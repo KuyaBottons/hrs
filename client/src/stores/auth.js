@@ -1,32 +1,40 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
-const MAX_ACCOUNTS = 2 // Super Admin + Admin only
-
 export const useAuthStore = defineStore('auth', () => {
-  // Version key — clears old seeds when auth store changes
-  const STORE_VERSION = 'v2'
+  const STORE_VERSION = 'v3'
   if (localStorage.getItem('hris_users_version') !== STORE_VERSION) {
     localStorage.removeItem('hris_users')
     localStorage.setItem('hris_users_version', STORE_VERSION)
   }
 
-  // Seed only the two allowed accounts if storage is empty
   const storedUsers = JSON.parse(localStorage.getItem('hris_users') || 'null')
   const users = ref(storedUsers || [
     { id: 1, username: 'superadmin', password: 'superadmin123', name: 'Super Admin', role: 'Super Admin', department: 'Human Resources' },
-    { id: 2, username: 'admin', password: 'admin123', name: 'HR Admin', role: 'Admin', department: 'Human Resources' },
+    { id: 2, username: 'admin',      password: 'admin123',      name: 'HR Admin',    role: 'Admin',       department: 'Human Resources' },
   ])
   if (!storedUsers) localStorage.setItem('hris_users', JSON.stringify(users.value))
 
   const currentUser = ref(JSON.parse(sessionStorage.getItem('hris_user') || 'null'))
-  const loginError = ref('')
+  const loginError  = ref('')
   const signupError = ref('')
 
   const isLoggedIn = computed(() => !!currentUser.value)
 
-  // True when account limit has been reached — hides "Create one" on login
-  const accountLimitReached = computed(() => users.value.length >= MAX_ACCOUNTS)
+  // Role helpers
+  const userRole = computed(() => currentUser.value?.role ?? '')
+  const isSectionAdmin = computed(() => userRole.value === 'Section Admin')
+  const isIT           = computed(() => userRole.value === 'IT')
+  const isFullAccess   = computed(() =>
+    ['Super Admin', 'Admin', 'IT'].includes(userRole.value)
+  )
+
+  // Section Admin can edit only in Schedule Database
+  function canEdit(section = '') {
+    if (['Super Admin', 'Admin', 'IT'].includes(userRole.value)) return true
+    if (userRole.value === 'Section Admin' && section === 'schedule') return true
+    return false
+  }
 
   const activityLog = ref(JSON.parse(sessionStorage.getItem('hris_log') || '[]'))
 
@@ -46,13 +54,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   function signup(data) {
     signupError.value = ''
-
-    // Hard limit check
-    if (users.value.length >= MAX_ACCOUNTS) {
-      signupError.value = 'Account limit reached. Only 2 accounts are allowed (Super Admin & Admin).'
-      return false
-    }
-
     if (!data.username || !data.password || !data.name) {
       signupError.value = 'Username, password, and full name are required.'
       return false
@@ -72,10 +73,10 @@ export const useAuthStore = defineStore('auth', () => {
 
     const newUser = {
       id: Date.now(),
-      username: data.username,
-      password: data.password,
-      name: data.name,
-      role: data.role || 'Admin',
+      username:   data.username,
+      password:   data.password,
+      name:       data.name,
+      role:       data.role || 'Admin',
       department: data.department || 'Human Resources',
     }
     users.value.push(newUser)
@@ -89,7 +90,6 @@ export const useAuthStore = defineStore('auth', () => {
     if (idx !== -1) {
       users.value[idx] = { ...users.value[idx], ...data }
       localStorage.setItem('hris_users', JSON.stringify(users.value))
-      // Update session
       const { password: _p, ...safeUser } = users.value[idx]
       currentUser.value = safeUser
       sessionStorage.setItem('hris_user', JSON.stringify(safeUser))
@@ -107,12 +107,10 @@ export const useAuthStore = defineStore('auth', () => {
 
   function addLog(action, module, details) {
     const entry = {
-      id: Date.now(),
+      id:        Date.now(),
       timestamp: new Date().toLocaleString('en-PH', { hour12: true }),
-      user: currentUser.value?.name || 'System',
-      action,
-      module,
-      details,
+      user:      currentUser.value?.name || 'System',
+      action, module, details,
       status: 'OK',
     }
     activityLog.value.unshift(entry)
@@ -122,7 +120,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     currentUser, isLoggedIn, loginError, signupError,
-    activityLog, accountLimitReached, users,
+    activityLog, users, userRole, isSectionAdmin, isIT, isFullAccess, canEdit,
     login, signup, logout, updateProfile, addLog,
   }
 })
