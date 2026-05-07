@@ -21,9 +21,10 @@ const pageTitle = computed(() => {
     "/verification": "Verification",
     "/tracking": "Tracking & Receiving",
     "/signatories": "Signatories",
-    "/audit": "Audit & Transmittal",
+    "/audit": "Transmittal Summary",
     "/schedule": "Schedule Database",
     "/ai-scanning": "AI Scanning Tools",
+    "/accounts": "Account Management",
     "/trainings": "Trainings Management",
   }
   return map[route.path] || "HRIS"
@@ -48,6 +49,7 @@ const showProfileModal = ref(false)
 const showDeletePrompt = ref(false)
 const deleteConfirmText = ref("")
 const deleteError = ref("")
+const showRequestsPanel = ref(false)
 
 function toggleDropdown() { dropdownOpen.value = !dropdownOpen.value }
 
@@ -110,13 +112,28 @@ function saveProfile() {
   const updateData = {
     name: profileForm.value.name,
     username: profileForm.value.username,
-    role: profileForm.value.role,
     avatar: profilePicPreview.value,
   }
   if (profileForm.value.newPassword) updateData.password = profileForm.value.newPassword
-  auth.updateProfile(updateData)
-  profileSuccess.value = "Profile updated successfully!"
-  setTimeout(() => { showProfileModal.value = false }, 1200)
+
+  // DIOS: save directly, role field included
+  if (auth.userRole === 'DIOS') {
+    updateData.role = profileForm.value.role
+    auth.updateProfile(updateData)
+    profileSuccess.value = "Profile updated successfully!"
+    setTimeout(() => { showProfileModal.value = false }, 1200)
+    return
+  }
+
+  // Super Admin / Admin: submit a permission request
+  if (auth.myPendingRequest) {
+    profileError.value = "You already have a pending profile change request. Please wait for approval."
+    return
+  }
+  auth.requestProfileChange(updateData)
+  profileSuccess.value = "Request submitted! Awaiting approval from " +
+    (auth.userRole === 'Admin' ? 'DIOS or Super Admin.' : 'DIOS.')
+  setTimeout(() => { showProfileModal.value = false }, 1800)
 }
 
 function openDeletePrompt() {
@@ -198,13 +215,26 @@ const initials = computed(() => {
             <button class="dropdown-item" @click="openProfile">
               <span class="di-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/></svg></span>
               My Profile
+              <span v-if="auth.myPendingRequest" class="pending-dot" title="Profile change pending approval">●</span>
             </button>
+
+            <!-- Pending requests — visible to DIOS and Super Admin -->
+            <button
+              v-if="auth.pendingProfileRequests.length > 0"
+              class="dropdown-item requests-item"
+              @click="showRequestsPanel = !showRequestsPanel; dropdownOpen = false"
+            >
+              <span class="di-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg></span>
+              Profile Requests
+              <span class="req-badge">{{ auth.pendingProfileRequests.length }}</span>
+            </button>
+
             <div class="dropdown-divider"></div>
             <button class="dropdown-item logout-item" @click="logout">
               <span class="di-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg></span>
               Log Out
             </button>
-            <button class="dropdown-item delete-item" @click="openDeletePrompt">
+            <button v-if="auth.userRole !== 'DIOS'" class="dropdown-item delete-item" @click="openDeletePrompt">
               <span class="di-icon"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></span>
               Delete Account
             </button>
@@ -247,10 +277,12 @@ const initials = computed(() => {
             </div>
             <div class="form-group">
               <label>Role</label>
-              <select v-model="profileForm.role">
-                <option>Admin</option>
-                <option>Super Admin</option>
+              <!-- DIOS: editable dropdown showing DIOS only -->
+              <select v-if="auth.userRole === 'DIOS'" v-model="profileForm.role">
+                <option value="DIOS">DIOS</option>
               </select>
+              <!-- Super Admin / Admin: read-only role display -->
+              <input v-else :value="profileForm.role" readonly class="input-readonly" />
             </div>
             <div class="form-group">
               <label>New Password <span class="optional">(leave blank to keep current)</span></label>
@@ -264,10 +296,53 @@ const initials = computed(() => {
 
           <div v-if="profileError" class="form-error">{{ profileError }}</div>
           <div v-if="profileSuccess" class="form-success">{{ profileSuccess }}</div>
+          <!-- Notice for Super Admin / Admin -->
+          <div v-if="auth.userRole !== 'DIOS'" class="approval-notice">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+            Profile changes require approval from
+            {{ auth.userRole === 'Admin' ? 'DIOS or Super Admin' : 'DIOS' }}.
+          </div>
+          <div v-if="auth.myPendingRequest" class="pending-notice">
+            ⏳ You have a pending profile change request submitted on {{ auth.myPendingRequest.requestedAt }}. Awaiting approval.
+          </div>
         </div>
         <div class="modal-footer">
           <button class="btn-cancel" @click="showProfileModal = false">Cancel</button>
-          <button class="btn-save" @click="saveProfile">Save Changes</button>
+          <button class="btn-save" @click="saveProfile">
+            {{ auth.userRole === 'DIOS' ? 'Save Changes' : 'Submit for Approval' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </teleport>
+
+  <!-- Profile Change Requests Panel (DIOS / Super Admin) -->
+  <teleport to="body">
+    <div v-if="showRequestsPanel" class="modal-overlay" @click.self="showRequestsPanel = false">
+      <div class="requests-modal">
+        <div class="modal-header">
+          <h3>Profile Change Requests</h3>
+          <button class="close-btn" @click="showRequestsPanel = false">&#x2715;</button>
+        </div>
+        <div class="requests-body">
+          <div v-if="auth.pendingProfileRequests.length === 0" class="no-requests">
+            No pending requests.
+          </div>
+          <div v-for="req in auth.pendingProfileRequests" :key="req.id" class="request-card">
+            <div class="req-info">
+              <div class="req-name">{{ req.userName }} <span class="req-role-chip">{{ req.userRole }}</span></div>
+              <div class="req-date">Requested: {{ req.requestedAt }}</div>
+              <div class="req-changes">
+                <div v-if="req.changes.name"><strong>Name:</strong> {{ req.changes.name }}</div>
+                <div v-if="req.changes.username"><strong>Username:</strong> {{ req.changes.username }}</div>
+                <div v-if="req.changes.password"><strong>Password:</strong> ••••••</div>
+              </div>
+            </div>
+            <div class="req-actions">
+              <button class="btn-approve" @click="auth.approveProfileRequest(req.id)">✓ Approve</button>
+              <button class="btn-reject"  @click="auth.rejectProfileRequest(req.id)">✗ Reject</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -482,4 +557,67 @@ const initials = computed(() => {
     transform: translateY(0) scale(1);
   }
 }
+
+/* Pending dot on My Profile */
+.pending-dot { color: #e67e22; font-size: 10px; margin-left: auto; }
+
+/* Requests button */
+.requests-item { color: #2980b9; }
+.requests-item:hover { background: #ebf5fb; }
+.requests-item .di-icon svg { fill: #2980b9; }
+.req-badge {
+  margin-left: auto; background: #e74c3c; color: #fff;
+  font-size: 10px; font-weight: 800; border-radius: 10px;
+  padding: 1px 7px; min-width: 18px; text-align: center;
+}
+
+/* Approval notice in profile modal */
+.approval-notice {
+  display: flex; align-items: center; gap: 6px;
+  background: #ebf5fb; border: 1px solid #aed6f1; border-radius: 6px;
+  padding: 8px 12px; font-size: 12px; color: #2980b9; margin-top: 8px;
+}
+.approval-notice svg { fill: #2980b9; flex-shrink: 0; }
+.pending-notice {
+  background: #fff8e1; border: 1px solid #ffe082; border-radius: 6px;
+  padding: 8px 12px; font-size: 12px; color: #7d5a00; margin-top: 6px;
+}
+.input-readonly {
+  padding: 9px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px;
+  font-size: 13px; background: #f8f9fa; color: #888; cursor: not-allowed;
+}
+
+/* Requests modal */
+.requests-modal {
+  background: #fff; border-radius: 14px; width: 500px; max-width: 95vw;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25); overflow: hidden;
+  animation: profileFadeDown 0.35s ease both;
+}
+.requests-body { padding: 16px 20px; max-height: 60vh; overflow-y: auto; }
+.no-requests { text-align: center; color: #aaa; padding: 24px; font-size: 14px; }
+.request-card {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  border: 1px solid #e9ecef; border-radius: 10px; padding: 14px 16px; margin-bottom: 10px;
+  background: #fafafa;
+}
+.req-info { flex: 1; }
+.req-name { font-size: 14px; font-weight: 700; color: #1a3a5c; display: flex; align-items: center; gap: 8px; }
+.req-role-chip {
+  font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 8px;
+  background: #ebf5fb; color: #2980b9;
+}
+.req-date { font-size: 11px; color: #aaa; margin: 3px 0 8px; }
+.req-changes { font-size: 12px; color: #555; display: flex; flex-direction: column; gap: 3px; }
+.req-changes strong { color: #1a3a5c; }
+.req-actions { display: flex; flex-direction: column; gap: 6px; flex-shrink: 0; }
+.btn-approve {
+  padding: 7px 14px; border-radius: 7px; border: none;
+  background: #1a6b3c; color: #fff; cursor: pointer; font-size: 12px; font-weight: 700;
+}
+.btn-approve:hover { background: #27ae60; }
+.btn-reject {
+  padding: 7px 14px; border-radius: 7px; border: none;
+  background: #e74c3c; color: #fff; cursor: pointer; font-size: 12px; font-weight: 700;
+}
+.btn-reject:hover { background: #c0392b; }
 </style>

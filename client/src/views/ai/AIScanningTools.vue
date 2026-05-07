@@ -1,436 +1,874 @@
-<script setup>
+﻿<script setup>
 import { ref, onMounted } from 'vue'
 
-// Load Tesseract.js from CDN for real OCR
+const API     = 'http://localhost/hrs/server/api/ai_scan.php'
+const SAVE_API = API + '?action=save'
+
+// -- Tesseract for image OCR ---------------------------------------------------
 let Tesseract = null
 onMounted(async () => {
+  await loadSavedScans()
   if (!window.Tesseract) {
-    await new Promise((resolve, reject) => {
-      const script = document.createElement('script')
-      script.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
-      script.onload = resolve
-      script.onerror = reject
-      document.head.appendChild(script)
-    })
+    const s = document.createElement('script')
+    s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js'
+    await new Promise((res, rej) => { s.onload = res; s.onerror = rej; document.head.appendChild(s) })
   }
   Tesseract = window.Tesseract
 })
 
-const svgIcons = {
-  robot: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zm-9 7H9v-2h2v2zm4 0h-2v-2h2v2zm1-5H8V7h8v4z"/></svg>`,
-  document: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>`,
-  leave: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"/></svg>`,
-  money: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>`,
-  delete: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>`,
-  check: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>`,
-  edit: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`,
-  upload: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>`,
-  search: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>`,
+// -- Icons ---------------------------------------------------------------------
+const icons = {
+  robot:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zm-9 7H9v-2h2v2zm4 0h-2v-2h2v2zm1-5H8V7h8v4z"/></svg>',
+  upload:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19.35 10.04A7.49 7.49 0 0 0 12 4C9.11 4 6.6 5.64 5.35 8.04A5.994 5.994 0 0 0 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
+  doc:      '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>',
+  delete:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
+  save:     '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>',
+  edit:     '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
+  close:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+  check:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+  spinner:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>',
+  eye:      '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
 }
 
-const dragOver = ref(false)
-const scannedFiles = ref([
-  {
-    id: 1, name: 'DTR_April2026_NursingDept.pdf', type: 'DTR',
-    size: '245 KB', uploadDate: '2026-04-16', status: 'Processed',
-    extractedData: {
-      employeeName: 'Dela Cruz, Juan S.',
-      period: 'April 1-15, 2026',
-      department: 'Nursing',
-      totalHours: 80,
-      overtime: 4,
-    },
-    confidence: 94,
-  },
-  {
-    id: 2, name: 'LeaveForm_Santos_April.jpg', type: 'Leave Form',
-    size: '128 KB', uploadDate: '2026-04-15', status: 'Processed',
-    extractedData: {
-      employeeName: 'Santos, Pedro L.',
-      leaveType: 'Sick Leave',
-      dateFrom: '2026-04-10',
-      dateTo: '2026-04-11',
-      days: 2,
-    },
-    confidence: 88,
-  },
-  {
-    id: 3, name: 'Payslip_March2026.pdf', type: 'Payslip',
-    size: '312 KB', uploadDate: '2026-04-14', status: 'Review Needed',
-    extractedData: {
-      employeeName: 'Reyes, Maria G.',
-      period: 'March 2026',
-      grossPay: 72000,
-      netPay: 54050,
-    },
-    confidence: 72,
-  },
-])
-const nextId = ref(4)
-const selectedFile = ref(null)
-const processing = ref(false)
+// -- State ---------------------------------------------------------------------
+const dragOver      = ref(false)
+const uploading     = ref(false)
+const uploadProgress = ref('')
+const savedScans    = ref([])
+const pendingScans  = ref([])   // scanned but not yet saved to DB
+const selectedScan  = ref(null)
+const showPreview   = ref(false)
+const editMode      = ref(false)
+const saving        = ref(false)
+const errorMsg      = ref('')
 
-function fileTypeIcon(type) {
-  if (type === 'DTR') return svgIcons.document
-  if (type === 'Leave Form') return svgIcons.leave
-  if (type === 'Payslip') return svgIcons.money
-  return svgIcons.document
+// -- Load saved scans from DB --------------------------------------------------
+async function loadSavedScans() {
+  try {
+    const res  = await fetch(API)
+    const data = await res.json()
+    savedScans.value = Array.isArray(data) ? data : []
+  } catch (e) { console.warn('Could not load saved scans:', e.message) }
 }
 
+// -- File drop / input ---------------------------------------------------------
 function onDrop(e) {
   dragOver.value = false
   const files = e.dataTransfer?.files || e.target?.files
-  if (files && files.length > 0) {
-    processFiles(files)
-  }
+  if (files?.length) processFiles(files)
 }
 
 function onFileInput(e) {
   processFiles(e.target.files)
+  e.target.value = ''
 }
 
-function processFiles(files) {
-  processing.value = true
-  Array.from(files).forEach(file => {
-    const docType = detectDocType(file.name)
-    const entry = {
-      id: nextId.value++,
-      name: file.name,
-      type: docType,
-      size: formatSize(file.size),
-      uploadDate: new Date().toISOString().split('T')[0],
-      status: 'Processing...',
-      extractedData: {},
-      confidence: 0,
-      rawText: '',
-    }
-    scannedFiles.value.unshift(entry)
-    const entryId = entry.id
+async function processFiles(files) {
+  uploading.value = true
+  errorMsg.value  = ''
+  for (const file of Array.from(files)) {
+    uploadProgress.value = `Uploading ${file.name}...`
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const res  = await fetch(API, { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Upload failed')
 
-    const isImage = file.type.startsWith('image/')
+      const scan = { ...data, _saved: false, _editing: false }
 
-    if (isImage && Tesseract) {
-      // Real OCR via Tesseract.js
-      Tesseract.recognize(file, 'eng', {
-        logger: () => {},
-      }).then(({ data }) => {
-        const idx = scannedFiles.value.findIndex(f => f.id === entryId)
-        if (idx !== -1) {
-          const confidence = Math.round(data.confidence)
-          scannedFiles.value[idx].rawText = data.text
-          scannedFiles.value[idx].confidence = confidence
-          scannedFiles.value[idx].status = confidence >= 60 ? 'Processed' : 'Review Needed'
-          scannedFiles.value[idx].extractedData = parseOCRText(data.text, docType)
+      // If image, run client-side Tesseract OCR
+      if (data.needs_ocr && Tesseract) {
+        try {
+          uploadProgress.value = `Preprocessing image...`
+          const preprocessed = await preprocessImage(file)
+
+          // Run OCR with PSM 6 (uniform block) â€” best for dense document tables
+          uploadProgress.value = `Scanning text (this may take 30-60 seconds)...`
+          const { data: ocrData } = await Tesseract.recognize(preprocessed, 'eng', {
+            logger: m => {
+              if (m.status === 'recognizing text') {
+                uploadProgress.value = `OCR progress: ${Math.round((m.progress || 0) * 100)}%`
+              }
+            },
+            tessedit_pageseg_mode:    '6',  // PSM 6 = uniform block of text (best for tables)
+            tessedit_ocr_engine_mode: '1',  // OEM 1 = LSTM neural net only
+            preserve_interword_spaces: '1',
+          })
+
+          const rawText = (ocrData.text || '').trim()
+          scan.confidence     = Math.round(ocrData.confidence)
+          scan.raw_text       = rawText
+          scan.html_table     = buildOcrHtml(rawText)
+          scan.extracted_data = parseOCRText(rawText, scan.doc_type)
+          scan.status         = scan.confidence >= 40 ? 'Processed' : 'Review Needed'
+        } catch (e) {
+          console.error('OCR error:', e)
+          scan.status     = 'Review Needed'
+          scan.raw_text   = 'OCR failed. Try uploading the original digital file (Excel/PDF) for better results.'
         }
-        processing.value = false
-      }).catch(() => {
-        const idx = scannedFiles.value.findIndex(f => f.id === entryId)
-        if (idx !== -1) {
-          scannedFiles.value[idx].status = 'Review Needed'
-          scannedFiles.value[idx].extractedData = { error: 'OCR failed. Please try again.' }
-        }
-        processing.value = false
-      })
-    } else {
-      // Simulate for PDFs / DOCX (no native browser OCR)
-      setTimeout(() => {
-        const idx = scannedFiles.value.findIndex(f => f.id === entryId)
-        if (idx !== -1) {
-          scannedFiles.value[idx].status = 'Processed'
-          scannedFiles.value[idx].confidence = Math.floor(Math.random() * 20) + 75
-          scannedFiles.value[idx].extractedData = simulateExtraction(docType)
-        }
-        processing.value = false
-      }, 1800)
+      }
+
+      pendingScans.value.unshift(scan)
+      selectedScan.value = scan
+      showPreview.value  = true
+    } catch (e) {
+      errorMsg.value = e.message
     }
+  }
+  uploading.value      = false
+  uploadProgress.value = ''
+}
+
+// -- Image pre-processing for better OCR --------------------------------------
+async function preprocessImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(file)
+    img.onload = () => {
+      // â”€â”€ Step 1: Upscale to 3000px on longest side â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      const TARGET = 3000
+      const maxDim = Math.max(img.width, img.height)
+      const scale  = maxDim < TARGET ? TARGET / maxDim : 1
+      const W = Math.round(img.width  * scale)
+      const H = Math.round(img.height * scale)
+
+      const canvas = document.createElement('canvas')
+      const ctx    = canvas.getContext('2d')
+      canvas.width  = W
+      canvas.height = H
+      ctx.drawImage(img, 0, 0, W, H)
+      URL.revokeObjectURL(url)
+
+      const imageData = ctx.getImageData(0, 0, W, H)
+      const d = imageData.data
+      const N = W * H
+
+      // â”€â”€ Step 2: Grayscale â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      const gray = new Float32Array(N)
+      for (let i = 0; i < N; i++) {
+        gray[i] = 0.299 * d[i*4] + 0.587 * d[i*4+1] + 0.114 * d[i*4+2]
+      }
+
+      // â”€â”€ Step 3: Gaussian blur (3x3) to reduce noise â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      const blurred = new Float32Array(N)
+      const kernel  = [1,2,1, 2,4,2, 1,2,1]  // sum=16
+      for (let y = 1; y < H-1; y++) {
+        for (let x = 1; x < W-1; x++) {
+          let sum = 0
+          let ki  = 0
+          for (let dy = -1; dy <= 1; dy++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              sum += gray[(y+dy)*W + (x+dx)] * kernel[ki++]
+            }
+          }
+          blurred[y*W+x] = sum / 16
+        }
+      }
+
+      // â”€â”€ Step 4: Unsharp mask â€” sharpen edges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      const sharp = new Float32Array(N)
+      const AMOUNT = 2.0
+      for (let i = 0; i < N; i++) {
+        sharp[i] = Math.min(255, Math.max(0, gray[i] + AMOUNT * (gray[i] - blurred[i])))
+      }
+
+      // â”€â”€ Step 5: Adaptive threshold (Sauvola) â€” handles uneven lighting â”€â”€â”€â”€â”€
+      // Block size ~2% of image, minimum 15px
+      const BLOCK = Math.max(15, Math.round(Math.min(W, H) * 0.02)) | 1
+      const K = 0.2
+      const R = 128
+      const out = new Uint8Array(N)
+      const half = BLOCK >> 1
+
+      // Build integral image for fast local mean
+      const integral = new Float64Array((W+1) * (H+1))
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          integral[(y+1)*(W+1)+(x+1)] = sharp[y*W+x]
+            + integral[y*(W+1)+(x+1)]
+            + integral[(y+1)*(W+1)+x]
+            - integral[y*(W+1)+x]
+        }
+      }
+
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          const x1 = Math.max(0, x-half), x2 = Math.min(W-1, x+half)
+          const y1 = Math.max(0, y-half), y2 = Math.min(H-1, y+half)
+          const count = (x2-x1+1) * (y2-y1+1)
+          const sum   = integral[(y2+1)*(W+1)+(x2+1)]
+                      - integral[y1*(W+1)+(x2+1)]
+                      - integral[(y2+1)*(W+1)+x1]
+                      + integral[y1*(W+1)+x1]
+          const mean  = sum / count
+
+          // Compute local std via second pass (simplified)
+          let sumSq = 0
+          for (let dy = y1; dy <= y2; dy++) {
+            for (let dx = x1; dx <= x2; dx++) {
+              const v = sharp[dy*W+dx] - mean
+              sumSq += v * v
+            }
+          }
+          const std = Math.sqrt(sumSq / count)
+          const threshold = mean * (1 + K * (std / R - 1))
+          out[y*W+x] = sharp[y*W+x] >= threshold ? 255 : 0
+        }
+      }
+
+      // â”€â”€ Step 6: Write back as black-on-white â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+      for (let i = 0; i < N; i++) {
+        d[i*4] = d[i*4+1] = d[i*4+2] = out[i]
+        d[i*4+3] = 255
+      }
+      ctx.putImageData(imageData, 0, 0)
+      canvas.toBlob(blob => resolve(blob || file), 'image/png')
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(file) }
+    img.src = url
   })
 }
 
+// -- Build formatted HTML from OCR raw text ------------------------------------
+function buildOcrHtml(text) {
+  if (!text || !text.trim()) return ''
+  const lines = text.split('\n')
+  let html = '<div class="docx-body">'
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed) { html += '<br>'; continue }
+    // Detect if line looks like a table row (multiple whitespace-separated columns)
+    const cols = trimmed.split(/\s{2,}/).filter(c => c.trim())
+    if (cols.length >= 3) {
+      html += '<p class="docx-p ocr-row">' +
+        cols.map(c => `<span class="ocr-cell">${escHtml(c)}</span>`).join('') +
+        '</p>'
+    } else {
+      html += `<p class="docx-p">${escHtml(trimmed)}</p>`
+    }
+  }
+  html += '</div>'
+  return html
+}
+
+function escHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+
+// -- OCR text parser -----------------------------------------------------------
 function parseOCRText(text, docType) {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+  const lines  = text.split('\n').map(l => l.trim()).filter(Boolean)
   const result = {}
-
-  // Try to extract employee name (look for "Name:" or "Employee:")
-  const nameLine = lines.find(l => /name[:\s]/i.test(l))
-  if (nameLine) result.employeeName = nameLine.replace(/.*name[:\s]*/i, '').trim()
-
-  // Try to extract date patterns
-  const dateLine = lines.find(l => /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(l))
-  if (dateLine) result.date = dateLine.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/)?.[0]
-
-  // Try to extract department
-  const deptLine = lines.find(l => /department[:\s]/i.test(l))
-  if (deptLine) result.department = deptLine.replace(/.*department[:\s]*/i, '').trim()
-
-  // Type-specific extraction
-  if (docType === 'DTR') {
-    const hoursLine = lines.find(l => /hours?[:\s]/i.test(l))
-    if (hoursLine) result.totalHours = hoursLine.replace(/.*hours?[:\s]*/i, '').trim()
+  for (const line of lines) {
+    if (/name[:\s]/i.test(line))        result.employeeName  = line.replace(/.*name[:\s]*/i, '').trim()
+    if (/department[:\s]/i.test(line))  result.department    = line.replace(/.*department[:\s]*/i, '').trim()
+    if (/period[:\s]/i.test(line))      result.period        = line.replace(/.*period[:\s]*/i, '').trim()
+    if (/position[:\s]/i.test(line))    result.position      = line.replace(/.*position[:\s]*/i, '').trim()
+    if (/leave type[:\s]/i.test(line))  result.leaveType     = line.replace(/.*leave type[:\s]*/i, '').trim()
+    if (/total hours?[:\s]/i.test(line)) result.totalHours   = line.replace(/.*total hours?[:\s]*/i, '').trim()
+    if (/gross pay[:\s]/i.test(line))   result.grossPay      = line.replace(/.*gross pay[:\s]*/i, '').trim()
+    if (/net pay[:\s]/i.test(line))     result.netPay        = line.replace(/.*net pay[:\s]*/i, '').trim()
+    const dateMatch = line.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/)
+    if (dateMatch && !result.date)      result.date          = dateMatch[0]
   }
-  if (docType === 'Leave Form') {
-    const leaveLine = lines.find(l => /leave type[:\s]/i.test(l))
-    if (leaveLine) result.leaveType = leaveLine.replace(/.*leave type[:\s]*/i, '').trim()
-  }
-
-  // If nothing extracted, show raw text preview
-  if (Object.keys(result).length === 0) {
-    result.rawTextPreview = text.substring(0, 200) + (text.length > 200 ? '...' : '')
-  }
-
+  if (!Object.keys(result).length) result.textPreview = text.substring(0, 300)
   return result
 }
 
-function detectDocType(name) {
-  const lower = name.toLowerCase()
-  if (lower.includes('dtr')) return 'DTR'
-  if (lower.includes('leave')) return 'Leave Form'
-  if (lower.includes('payslip') || lower.includes('payroll')) return 'Payslip'
-  if (lower.includes('to') || lower.includes('travel')) return 'Travel Order'
-  return 'Unknown'
+// -- Preview / select ----------------------------------------------------------
+function openPreview(scan) {
+  selectedScan.value = scan
+  showPreview.value  = true
+  editMode.value     = false
 }
 
-function formatSize(bytes) {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+function closePreview() {
+  showPreview.value = false
+  editMode.value    = false
 }
 
-function simulateExtraction(type) {
-  const samples = {
-    DTR: { employeeName: 'Extracted Employee', period: 'April 2026', totalHours: 80 },
-    'Leave Form': { employeeName: 'Extracted Employee', leaveType: 'Vacation Leave', days: 1 },
-    Payslip: { employeeName: 'Extracted Employee', grossPay: 35000, netPay: 28000 },
-    'Travel Order': { employeeName: 'Extracted Employee', destination: 'Manila', days: 1 },
+// -- Save to DB ----------------------------------------------------------------
+async function saveScan(scan) {
+  saving.value = true
+  try {
+    const res  = await fetch(SAVE_API, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        file_name:      scan.file_name,
+        file_path:      scan.file_path,
+        doc_type:       scan.doc_type,
+        file_size:      scan.file_size,
+        confidence:     scan.confidence,
+        extracted_data: scan.extracted_data,
+        raw_text:       scan.raw_text,
+        status:         scan.status,
+      }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Save failed')
+    scan._saved = true
+    scan.id     = data.id
+    savedScans.value.unshift({ ...scan })
+    pendingScans.value = pendingScans.value.filter(s => s !== scan)
+    showPreview.value  = false
+    alert('Saved successfully!')
+  } catch (e) { alert('Save failed: ' + e.message) }
+  finally { saving.value = false }
+}
+
+// -- Delete --------------------------------------------------------------------
+async function deleteScan(scan) {
+  if (!confirm(`Delete "${scan.file_name}"?`)) return
+  if (scan.id) {
+    await fetch(`${API}?id=${scan.id}`, { method: 'DELETE' })
+    savedScans.value = savedScans.value.filter(s => s.id !== scan.id)
+  } else {
+    pendingScans.value = pendingScans.value.filter(s => s !== scan)
   }
-  return samples[type] || {}
+  if (selectedScan.value === scan) { selectedScan.value = null; showPreview.value = false }
 }
 
-function deleteFile(id) {
-  scannedFiles.value = scannedFiles.value.filter(f => f.id !== id)
-  if (selectedFile.value?.id === id) selectedFile.value = null
+// -- Export functions ----------------------------------------------------------
+function exportToExcel(scan) {
+  const rows = []
+  rows.push(['GEAMH HRIS ï¿½ AI Scan Export'])
+  rows.push(['File Name', scan.file_name || ''])
+  rows.push(['Document Type', scan.doc_type || ''])
+  rows.push(['File Size', scan.file_size || ''])
+  rows.push(['AI Confidence', (scan.confidence || 0) + '%'])
+  rows.push(['Status', scan.status || ''])
+  rows.push([])
+
+  if (scan.table_rows && scan.table_rows.length) {
+    rows.push(['--- Extracted Table ---'])
+    scan.table_rows.forEach(r => rows.push(Array.isArray(r) ? r : Object.values(r)))
+  } else if (scan.extracted_data && Object.keys(scan.extracted_data).length) {
+    rows.push(['Field', 'Value'])
+    Object.entries(scan.extracted_data).forEach(([k, v]) =>
+      rows.push([k.replace(/([A-Z])/g, ' $1').trim(), String(v)])
+    )
+  }
+
+  if (scan.raw_text) {
+    rows.push([])
+    rows.push(['--- Raw Text ---'])
+    scan.raw_text.split('\n').forEach(line => rows.push([line]))
+  }
+
+  const csv  = rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\r\n')
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' })
+  triggerDownload(blob, (scan.file_name || 'scan').replace(/\.[^.]+$/, '') + '_extracted.csv')
 }
 
+function exportToWord(scan) {
+  const title = scan.file_name || 'Scanned Document'
+
+  let tableHtml = ''
+  if (scan.html_table) {
+    tableHtml = scan.html_table
+      .replace(/<table/g, '<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:10pt"')
+      .replace(/<th/g, '<th style="background:#1a3a5c;color:#fff;padding:6px;text-align:left"')
+      .replace(/<td/g, '<td style="padding:5px;border:1px solid #ccc"')
+  } else if (scan.extracted_data && Object.keys(scan.extracted_data).length) {
+    tableHtml = `<table border="1" cellpadding="5" cellspacing="0" style="border-collapse:collapse;width:100%;font-size:10pt">
+      <tr style="background:#1a3a5c;color:#fff"><th>Field</th><th>Value</th></tr>`
+    Object.entries(scan.extracted_data).forEach(([k, v]) => {
+      tableHtml += `<tr><td><b>${k.replace(/([A-Z])/g, ' $1').trim()}</b></td><td>${v}</td></tr>`
+    })
+    tableHtml += '</table>'
+  }
+
+  const rawSection = scan.raw_text
+    ? `<h3>Raw Extracted Text</h3>
+       <pre style="font-size:9pt;background:#f5f5f5;padding:10px;border:1px solid #ddd;white-space:pre-wrap">${
+         scan.raw_text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+       }</pre>`
+    : ''
+
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office"
+    xmlns:w="urn:schemas-microsoft-com:office:word"
+    xmlns="http://www.w3.org/TR/REC-html40">
+  <head><meta charset="utf-8"><title>${title}</title>
+  <!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->
+  <style>body{font-family:Calibri,sans-serif;margin:2cm}h1{color:#1a3a5c}h2,h3{color:#1a3a5c}</style>
+  </head>
+  <body>
+    <h1>${title}</h1>
+    <table border="0" cellpadding="4" style="font-size:10pt;margin-bottom:12pt">
+      <tr><td><b>Document Type</b></td><td>${scan.doc_type || ''}</td></tr>
+      <tr><td><b>File Size</b></td><td>${scan.file_size || ''}</td></tr>
+      <tr><td><b>AI Confidence</b></td><td>${scan.confidence || 0}%</td></tr>
+      <tr><td><b>Status</b></td><td>${scan.status || ''}</td></tr>
+    </table>
+    <hr/>
+    <h2>Extracted Data</h2>
+    ${tableHtml || '<p><i>No structured data extracted.</i></p>'}
+    ${rawSection}
+  </body></html>`
+
+  const blob = new Blob([html], { type: 'application/msword' })
+  triggerDownload(blob, (scan.file_name || 'scan').replace(/\.[^.]+$/, '') + '_extracted.doc')
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a   = document.createElement('a')
+  a.href    = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+// -- Helpers -------------------------------------------------------------------
 function confidenceColor(c) {
-  if (c >= 90) return '#27ae60'
-  if (c >= 75) return '#e67e22'
+  if (c >= 85) return '#27ae60'
+  if (c >= 65) return '#e67e22'
   return '#c0392b'
 }
-
 function statusClass(s) {
-  if (s === 'Processed') return 'badge-green'
-  if (s === 'Review Needed') return 'badge-orange'
-  if (s === 'Processing...') return 'badge-blue'
-  return 'badge-gray'
+  return { 'Processed':'badge-green','Review Needed':'badge-orange','Processing...':'badge-blue' }[s] || 'badge-gray'
+}
+function isImage(scan) {
+  return ['jpg','jpeg','png','gif','bmp','webp'].includes(scan.ext || '')
+}
+function isPdf(scan) { return scan.ext === 'pdf' }
+function docTypeColor(t) {
+  return { 'DTR':'#1a3a5c','Leave Form':'#27ae60','Payslip':'#8e44ad','Travel Order':'#e67e22','Schedule':'#2980b9' }[t] || '#666'
 }
 </script>
 
 <template>
   <div class="page">
+
+    <!-- Header -->
     <div class="ai-header">
-      <div class="ai-title">
-        <span class="icon-svg ai-icon" v-html="svgIcons.robot"></span>
-        <div>
-          <h2>AI Document Scanning Tools</h2>
-          <p>Upload DTR, Leave Forms, Payslips, and other HR documents for automatic data extraction.</p>
-        </div>
+      <span class="ai-icon" v-html="icons.robot"></span>
+      <div>
+        <h2>AI Document Scanning</h2>
+        <p>Upload HR documents for automatic data extraction. Preview before saving.</p>
       </div>
+    </div>
+
+    <!-- Error banner -->
+    <div v-if="errorMsg" class="error-banner">
+      ?? {{ errorMsg }}
+      <button @click="errorMsg = ''" class="err-close">?</button>
     </div>
 
     <!-- Upload Zone -->
-    <div
-      class="upload-zone"
-      :class="{ 'drag-over': dragOver }"
+    <div class="upload-zone" :class="{ 'drag-over': dragOver }"
       @dragover.prevent="dragOver = true"
       @dragleave="dragOver = false"
-      @drop.prevent="onDrop"
-    >
-      <div class="upload-content">
-        <div class="upload-icon"><span class="icon-svg upload-svg" v-html="svgIcons.upload"></span></div>
+      @drop.prevent="onDrop">
+      <div class="upload-inner">
+        <span class="upload-svg" v-html="icons.upload"></span>
         <div class="upload-text">
           <strong>Drag & Drop files here</strong>
           <span>or</span>
-          <label class="upload-btn">
+          <label class="browse-btn">
             Browse Files
-            <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.docx" @change="onFileInput" hidden />
+            <input type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.gif,.bmp,.webp,.xlsx,.xls,.csv,.docx,.doc" @change="onFileInput" hidden />
           </label>
         </div>
-        <div class="upload-hint">📷 Images (JPG, PNG) → Real OCR via Tesseract.js &nbsp;|&nbsp; 📄 PDF, DOCX → Simulated extraction</div>
+         <div class="upload-hint">
+           Supported: <strong>PDF · JPG · PNG · Excel (XLSX/CSV) · Word (DOCX)</strong> — Max 20 MB<br>
+           <span class="upload-tip">�� For best accuracy, upload the original digital file (Excel/PDF) instead of a photo of a document.</span>
+         </div>
       </div>
-      <div v-if="processing" class="processing-overlay">
-        <div class="spinner">⚙️</div>
-        <span>AI Processing...</span>
+      <div v-if="uploading" class="processing-overlay">
+        <span class="spin-icon" v-html="icons.spinner"></span>
+        <span>{{ uploadProgress || 'Processing...' }}</span>
       </div>
     </div>
 
-    <div class="content-grid">
-      <!-- File List -->
-      <div class="file-list-section">
-        <h3 class="section-title">
-          <span class="icon-svg" v-html="svgIcons.document"></span>
-          Scanned Documents ({{ scannedFiles.length }})
-        </h3>
-        <div class="file-list">
-          <div
-            v-for="f in scannedFiles"
-            :key="f.id"
-            class="file-item"
-            :class="{ selected: selectedFile?.id === f.id }"
-            @click="selectedFile = f"
-          >
-            <div class="file-icon">
-              <span class="icon-svg file-type-icon" v-html="fileTypeIcon(f.type)"></span>
-            </div>
-            <div class="file-info">
-              <strong>{{ f.name }}</strong>
-              <div class="file-meta">
-                <span class="badge" :class="statusClass(f.status)">{{ f.status }}</span>
-                <span class="file-size">{{ f.size }}</span>
-                <span class="file-date">{{ f.uploadDate }}</span>
-              </div>
-              <div v-if="f.confidence > 0" class="confidence-bar">
-                <div class="conf-label">AI Confidence: {{ f.confidence }}%</div>
-                <div class="conf-track">
-                  <div class="conf-fill" :style="{ width: f.confidence + '%', background: confidenceColor(f.confidence) }"></div>
-                </div>
-              </div>
-            </div>
-            <button class="btn-icon danger" @click.stop="deleteFile(f.id)">
-              <span class="icon-svg" v-html="svgIcons.delete"></span>
-            </button>
+    <!-- Main layout -->
+    <div class="main-layout">
+
+      <!-- Left: file lists -->
+      <div class="file-col">
+
+        <!-- Pending (not yet saved) -->
+        <div v-if="pendingScans.length" class="list-section">
+          <div class="list-header pending-header">
+            <span>? Pending Review ({{ pendingScans.length }})</span>
           </div>
-          <div v-if="scannedFiles.length === 0" class="empty-state">
-            No documents scanned yet. Upload files above.
+          <div v-for="scan in pendingScans" :key="scan.file_path"
+            class="file-row" :class="{ active: selectedScan === scan }"
+            @click="openPreview(scan)">
+            <span class="doc-type-dot" :style="{ background: docTypeColor(scan.doc_type) }"></span>
+            <div class="file-row-info">
+              <strong>{{ scan.file_name }}</strong>
+              <div class="file-row-meta">
+                <span class="badge" :class="statusClass(scan.status)">{{ scan.status }}</span>
+                <span class="fmeta">{{ scan.file_size }}</span>
+                <span class="fmeta doc-type-tag" :style="{ color: docTypeColor(scan.doc_type) }">{{ scan.doc_type }}</span>
+              </div>
+              <div v-if="scan.confidence > 0" class="mini-bar">
+                <div class="mini-fill" :style="{ width: scan.confidence + '%', background: confidenceColor(scan.confidence) }"></div>
+              </div>
+            </div>
+            <div class="file-row-actions" @click.stop>
+              <button class="btn-icon" title="Preview" @click="openPreview(scan)"><span v-html="icons.eye"></span></button>
+              <button class="btn-icon danger" title="Remove" @click="deleteScan(scan)"><span v-html="icons.delete"></span></button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Saved scans -->
+        <div class="list-section">
+          <div class="list-header saved-header">
+            <span>? Saved Scans ({{ savedScans.length }})</span>
+          </div>
+          <div v-if="savedScans.length === 0" class="list-empty">No saved scans yet.</div>
+          <div v-for="scan in savedScans" :key="scan.id"
+            class="file-row" :class="{ active: selectedScan === scan }"
+            @click="openPreview(scan)">
+            <span class="doc-type-dot" :style="{ background: docTypeColor(scan.doc_type) }"></span>
+            <div class="file-row-info">
+              <strong>{{ scan.file_name }}</strong>
+              <div class="file-row-meta">
+                <span class="badge" :class="statusClass(scan.status)">{{ scan.status }}</span>
+                <span class="fmeta">{{ scan.file_size }}</span>
+                <span class="fmeta doc-type-tag" :style="{ color: docTypeColor(scan.doc_type) }">{{ scan.doc_type }}</span>
+              </div>
+            </div>
+            <div class="file-row-actions" @click.stop>
+              <button class="btn-icon" title="Preview" @click="openPreview(scan)"><span v-html="icons.eye"></span></button>
+              <button class="btn-icon danger" title="Delete" @click="deleteScan(scan)"><span v-html="icons.delete"></span></button>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- Extracted Data Preview -->
-      <div class="preview-section">
-        <h3 class="section-title">
-          <span class="icon-svg" v-html="svgIcons.search"></span>
-          Extracted Data Preview
-        </h3>
-        <div v-if="!selectedFile" class="empty-preview">
-          <span>👆</span>
-          <p>Select a document to view extracted data</p>
-        </div>
-        <div v-else class="preview-card">
-          <div class="preview-header">
-            <div class="preview-type">{{ selectedFile.type }}</div>
-            <div class="preview-name">{{ selectedFile.name }}</div>
-            <div class="preview-conf" :style="{ color: confidenceColor(selectedFile.confidence) }">
-              🎯 {{ selectedFile.confidence }}% confidence
+      <!-- Right: preview panel -->
+      <div class="preview-col" v-if="showPreview && selectedScan">
+        <div class="preview-panel">
+          <div class="preview-panel-header">
+            <div>
+              <span class="preview-doc-type" :style="{ background: docTypeColor(selectedScan.doc_type) + '22', color: docTypeColor(selectedScan.doc_type) }">
+                {{ selectedScan.doc_type }}
+              </span>
+              <h3>{{ selectedScan.file_name }}</h3>
+              <span class="preview-meta">{{ selectedScan.file_size }}</span>
+            </div>
+            <button class="btn-icon" @click="closePreview"><span v-html="icons.close"></span></button>
+          </div>
+
+          <!-- File preview -->
+          <div class="file-preview-box">
+            <img v-if="isImage(selectedScan) && selectedScan.preview_url"
+              :src="selectedScan.preview_url" class="preview-img" alt="Document preview" />
+            <iframe v-else-if="isPdf(selectedScan) && selectedScan.preview_url"
+              :src="selectedScan.preview_url" class="preview-iframe"></iframe>
+            <div v-else class="preview-placeholder">
+              <span v-html="icons.doc" class="placeholder-icon"></span>
+              <p>{{ selectedScan.file_name }}</p>
+              <small>See extracted data below</small>
             </div>
           </div>
-          <div class="extracted-fields">
-            <div v-for="(val, key) in selectedFile.extractedData" :key="key" class="field-row">
-              <span class="field-key">{{ key.replace(/([A-Z])/g, ' $1').trim() }}</span>
-              <span class="field-val">{{ val }}</span>
+
+          <!-- Confidence -->
+          <div v-if="selectedScan.confidence > 0" class="confidence-row">
+            <span>AI Confidence</span>
+            <div class="conf-track">
+              <div class="conf-fill" :style="{ width: selectedScan.confidence + '%', background: confidenceColor(selectedScan.confidence) }"></div>
             </div>
-            <div v-if="Object.keys(selectedFile.extractedData).length === 0" class="no-data">
-              No data extracted yet.
-            </div>
+            <strong :style="{ color: confidenceColor(selectedScan.confidence) }">{{ selectedScan.confidence }}%</strong>
           </div>
+
+          <!-- Extracted data -->
+          <div class="extracted-section">
+            <div class="extracted-header">
+              <span>Extracted Data</span>
+              <button v-if="!selectedScan._saved && !selectedScan.html_table" class="btn-edit-toggle" @click="editMode = !editMode">
+                <span v-html="icons.edit"></span> {{ editMode ? 'Done' : 'Edit' }}
+              </button>
+            </div>
+
+            <!-- Spreadsheet / Word: show same table format as the file -->
+            <div v-if="selectedScan.html_table" class="extracted-table-wrap">
+              <div class="table-preview" v-html="selectedScan.html_table"></div>
+            </div>
+
+            <!-- Image / PDF OCR: show key-value pairs -->
+            <template v-else>
+              <div class="extracted-grid" v-if="selectedScan.extracted_data && Object.keys(selectedScan.extracted_data).length">
+                <div v-for="(val, key) in selectedScan.extracted_data" :key="key" class="ext-row">
+                  <span class="ext-key">{{ key.replace(/([A-Z])/g, ' $1').trim() }}</span>
+                  <input v-if="editMode" v-model="selectedScan.extracted_data[key]" class="ext-input" />
+                  <span v-else class="ext-val">{{ val }}</span>
+                </div>
+              </div>
+              <div v-else class="no-data">No data extracted. Try editing manually.</div>
+            </template>
+          </div>
+
+          <!-- Raw text -->
+          <details v-if="selectedScan.raw_text" class="raw-text-details">
+            <summary>Raw extracted text</summary>
+            <pre class="raw-text">{{ selectedScan.raw_text }}</pre>
+          </details>
+
+          <!-- Actions -->
           <div class="preview-actions">
-            <button class="btn btn-primary">
-              <span class="icon-svg" v-html="svgIcons.check"></span> Confirm & Save to System
+            <button v-if="!selectedScan._saved" class="btn btn-primary" @click="saveScan(selectedScan)" :disabled="saving">
+              <span v-html="icons.save"></span>
+              {{ saving ? 'Saving...' : 'Save to System' }}
             </button>
-            <button class="btn btn-secondary">
-              <span class="icon-svg" v-html="svgIcons.edit"></span> Edit Extracted Data
-            </button>
+            <span v-else class="saved-badge">? Saved to database</span>
+            <button class="btn btn-export-excel" @click="exportToExcel(selectedScan)">? Export Excel</button>
+            <button class="btn btn-export-word" @click="exportToWord(selectedScan)">? Export Word</button>
+            <button class="btn btn-secondary" @click="closePreview">Close</button>
           </div>
         </div>
       </div>
+
+      <div v-else class="preview-col empty-preview-col">
+        <div class="empty-preview">
+          <span v-html="icons.eye" class="empty-icon"></span>
+          <p>Select a document to preview extracted data</p>
+        </div>
+      </div>
+
     </div>
   </div>
 </template>
 
 <style scoped>
-.icon-svg { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; }
-.icon-svg :deep(svg) { width:100%; height:100%; fill:currentColor; }
-.page { padding: 24px; }
-.ai-header { display: flex; align-items: center; margin-bottom: 20px; }
-.ai-title { display: flex; align-items: center; gap: 16px; }
-.ai-icon { width: 40px; height: 40px; color: #1a3a5c; }
-.ai-icon :deep(svg) { width: 100%; height: 100%; }
-.ai-title h2 { margin: 0 0 4px; color: #1a3a5c; font-size: 20px; }
-.ai-title p { margin: 0; color: #666; font-size: 13px; }
+/* -- Base -- */
+.page { padding: 24px; display: flex; flex-direction: column; gap: 20px; }
+.ai-header { display: flex; align-items: center; gap: 14px; }
+.ai-icon { width: 40px; height: 40px; color: #1a3a5c; display: inline-flex; }
+.ai-icon :deep(svg) { width: 100%; height: 100%; fill: #1a3a5c; }
+.ai-header h2 { margin: 0 0 4px; color: #1a3a5c; font-size: 20px; }
+.ai-header p  { margin: 0; color: #666; font-size: 13px; }
+
+/* -- Error banner -- */
+.error-banner { background: #fdecea; border: 1px solid #f5b7b1; color: #c0392b; padding: 10px 16px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.err-close { background: none; border: none; cursor: pointer; color: #c0392b; font-size: 16px; }
+
+/* -- Upload zone -- */
 .upload-zone {
-  border: 2px dashed #a9cce3; border-radius: 12px; padding: 40px;
-  text-align: center; background: #f8fbff; margin-bottom: 24px;
-  transition: all 0.2s; position: relative; cursor: pointer;
+  border: 2px dashed #a9cce3; border-radius: 12px; padding: 36px;
+  background: #f8fbff; position: relative; transition: all 0.2s;
 }
 .upload-zone.drag-over { border-color: #1a3a5c; background: #ebf5fb; }
-.upload-content { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.upload-icon { display: flex; align-items: center; justify-content: center; }
-.upload-svg { width: 48px; height: 48px; color: #a9cce3; }
-.upload-svg :deep(svg) { width: 100%; height: 100%; }
+.upload-inner { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.upload-svg { width: 48px; height: 48px; color: #a9cce3; display: inline-flex; }
+.upload-svg :deep(svg) { width: 100%; height: 100%; fill: #a9cce3; }
 .upload-text { display: flex; align-items: center; gap: 8px; font-size: 15px; color: #555; }
 .upload-text strong { color: #1a3a5c; }
-.upload-btn {
-  background: #1a3a5c; color: #fff; padding: 6px 16px;
-  border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;
-}
-.upload-hint { font-size: 12px; color: #aaa; }
-.processing-overlay {
-  position: absolute; inset: 0; background: rgba(255,255,255,0.85);
-  display: flex; align-items: center; justify-content: center;
-  gap: 10px; font-size: 16px; font-weight: 600; color: #1a3a5c;
-  border-radius: 12px;
-}
-.spinner { animation: spin 1s linear infinite; display: inline-block; font-size: 24px; }
-@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.content-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-@media (max-width: 900px) { .content-grid { grid-template-columns: 1fr; } }
-.section-title { font-size: 15px; font-weight: 700; color: #1a3a5c; margin: 0 0 14px; display: flex; align-items: center; gap: 6px; }
-.file-list-section, .preview-section {
-  background: #fff; border-radius: 12px; padding: 20px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.07);
-}
-.file-list { display: flex; flex-direction: column; gap: 8px; max-height: 500px; overflow-y: auto; }
-.file-item {
-  display: flex; align-items: flex-start; gap: 12px; padding: 12px;
-  border: 1px solid #f0f4f8; border-radius: 8px; cursor: pointer; transition: all 0.2s;
-}
-.file-item:hover { background: #f9fafb; }
-.file-item.selected { border-color: #1a3a5c; background: #ebf5fb; }
-.file-icon { display: flex; align-items: center; flex-shrink: 0; }
-.file-type-icon { width: 24px; height: 24px; color: #1a3a5c; }
-.file-type-icon :deep(svg) { width: 100%; height: 100%; }
-.file-info { flex: 1; }
-.file-info strong { font-size: 13px; color: #1a3a5c; display: block; margin-bottom: 4px; }
-.file-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
-.file-size, .file-date { font-size: 11px; color: #888; }
-.confidence-bar { margin-top: 4px; }
-.conf-label { font-size: 11px; color: #555; margin-bottom: 3px; }
-.conf-track { height: 6px; background: #f0f4f8; border-radius: 3px; overflow: hidden; }
-.conf-fill { height: 100%; border-radius: 3px; transition: width 0.5s; }
-.badge { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-.badge-green { background: #eafaf1; color: #27ae60; }
+.browse-btn { background: #1a3a5c; color: #fff; padding: 6px 16px; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600; }
+.upload-hint { font-size: 12px; color: #aaa; text-align: center; }
+.upload-tip  { font-size: 11px; color: #e67e22; font-weight: 600; display: block; margin-top: 4px; }
+.processing-overlay { position: absolute; inset: 0; background: rgba(255,255,255,0.88); display: flex; align-items: center; justify-content: center; gap: 10px; font-size: 15px; font-weight: 600; color: #1a3a5c; border-radius: 12px; }
+.spin-icon { display: inline-flex; animation: spin 0.8s linear infinite; }
+.spin-icon :deep(svg) { width: 22px; height: 22px; fill: #1a3a5c; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* -- Main layout -- */
+.main-layout { display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: flex-start; }
+@media (max-width: 1000px) { .main-layout { grid-template-columns: 1fr; } }
+
+/* -- File list -- */
+.file-col { display: flex; flex-direction: column; gap: 12px; }
+.list-section { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); overflow: hidden; }
+.list-header { padding: 10px 14px; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+.pending-header { background: #fff8e1; color: #b8860b; border-bottom: 1px solid #fde8a0; }
+.saved-header   { background: #e8f5ee; color: #1a6b3c; border-bottom: 1px solid #c3e6cb; }
+.list-empty { padding: 20px; text-align: center; color: #aaa; font-size: 13px; }
+.file-row { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid #f5f5f5; cursor: pointer; transition: background 0.15s; }
+.file-row:last-child { border-bottom: none; }
+.file-row:hover { background: #f9fafb; }
+.file-row.active { background: #ebf5fb; }
+.doc-type-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.file-row-info { flex: 1; min-width: 0; }
+.file-row-info strong { font-size: 12px; color: #1a1a2e; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-row-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 3px; }
+.fmeta { font-size: 10px; color: #aaa; }
+.doc-type-tag { font-weight: 600; font-size: 10px; }
+.badge { padding: 1px 7px; border-radius: 8px; font-size: 10px; font-weight: 600; }
+.badge-green  { background: #eafaf1; color: #27ae60; }
 .badge-orange { background: #fef3e2; color: #e67e22; }
-.badge-blue { background: #ebf5fb; color: #2980b9; }
-.badge-gray { background: #f4f4f4; color: #666; }
-.btn-icon { background: none; border: none; cursor: pointer; padding: 3px; border-radius: 4px; flex-shrink: 0; display: inline-flex; align-items: center; }
-.btn-icon.danger:hover { background: #fdecea; }
-.empty-state { text-align: center; color: #aaa; padding: 40px; font-size: 13px; }
-.empty-preview { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 300px; color: #aaa; }
-.empty-preview span { font-size: 40px; }
-.empty-preview p { font-size: 14px; }
-.preview-card { border: 1px solid #f0f4f8; border-radius: 10px; overflow: hidden; }
-.preview-header { background: #1a3a5c; color: #fff; padding: 14px 16px; }
-.preview-type { font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: 1px; }
-.preview-name { font-size: 14px; font-weight: 600; margin: 4px 0; }
-.preview-conf { font-size: 13px; font-weight: 700; }
-.extracted-fields { padding: 16px; }
-.field-row {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 8px 0; border-bottom: 1px solid #f0f4f8; font-size: 13px;
+.badge-blue   { background: #ebf5fb; color: #2980b9; }
+.badge-gray   { background: #f4f4f4; color: #666; }
+.mini-bar { height: 3px; background: #f0f4f8; border-radius: 2px; margin-top: 4px; overflow: hidden; }
+.mini-fill { height: 100%; border-radius: 2px; }
+.file-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
+.btn-icon { background: none; border: none; cursor: pointer; padding: 4px; border-radius: 4px; display: inline-flex; align-items: center; color: #555; }
+.btn-icon :deep(svg) { width: 16px; height: 16px; fill: currentColor; }
+.btn-icon:hover { background: #f0f4f8; }
+.btn-icon.danger:hover { background: #fdecea; color: #e74c3c; }
+
+/* -- Preview panel -- */
+.preview-col { min-width: 0; }
+.preview-panel { background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.09); overflow: hidden; }
+.preview-panel-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 16px 18px; border-bottom: 1px solid #f0f4f8; }
+.preview-doc-type { padding: 2px 10px; border-radius: 10px; font-size: 11px; font-weight: 700; display: inline-block; margin-bottom: 4px; }
+.preview-panel-header h3 { margin: 0 0 2px; font-size: 14px; color: #1a1a2e; word-break: break-all; }
+.preview-meta { font-size: 11px; color: #aaa; }
+
+/* File preview area */
+.file-preview-box { background: #f8f9fa; border-bottom: 1px solid #f0f4f8; display: flex; align-items: center; justify-content: center; min-height: 200px; max-height: 320px; overflow: hidden; }
+.preview-img { max-width: 100%; max-height: 320px; object-fit: contain; }
+.preview-iframe { width: 100%; height: 320px; border: none; }
+.preview-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; color: #aaa; padding: 40px; }
+
+/* -- Table preview (Excel/CSV/Word) -- */
+.table-preview-wrap {
+  width: 100%;
+  max-height: 420px;
+  overflow: auto;
+  background: #fff;
 }
-.field-key { color: #888; text-transform: capitalize; }
-.field-val { font-weight: 600; color: #1a3a5c; }
-.no-data { text-align: center; color: #aaa; padding: 20px; }
-.preview-actions { display: flex; gap: 10px; padding: 14px 16px; border-top: 1px solid #f0f4f8; }
-.btn { padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
-.btn-primary { background: #1a3a5c; color: #fff; }
-.btn-secondary { background: #f0f4f8; color: #1a3a5c; border: 1px solid #ddd; }
+.table-preview :deep(.scan-table) {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: 'Segoe UI', sans-serif;
+}
+.table-preview :deep(.scan-table thead tr) {
+  background: #1a3a5c;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.table-preview :deep(.scan-table th) {
+  padding: 8px 10px;
+  text-align: left;
+  font-weight: 600;
+  white-space: nowrap;
+  border: 1px solid #2980b9;
+}
+.table-preview :deep(.scan-table td) {
+  padding: 6px 10px;
+  border: 1px solid #e9ecef;
+  white-space: nowrap;
+  color: #333;
+}
+.table-preview :deep(.scan-table tbody tr:nth-child(even)) {
+  background: #f8f9fa;
+}
+.table-preview :deep(.scan-table tbody tr:hover) {
+  background: #ebf5fb;
+}
+.placeholder-icon { width: 48px; height: 48px; }
+.placeholder-icon :deep(svg) { width: 48px; height: 48px; fill: #ccc; }
+.preview-placeholder p { margin: 0; font-size: 13px; font-weight: 600; color: #555; }
+.preview-placeholder small { font-size: 11px; }
+
+/* Confidence */
+.confidence-row { display: flex; align-items: center; gap: 10px; padding: 10px 18px; border-bottom: 1px solid #f0f4f8; font-size: 12px; color: #555; }
+.conf-track { flex: 1; height: 6px; background: #f0f4f8; border-radius: 3px; overflow: hidden; }
+.conf-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+
+/* Extracted data */
+.extracted-section { padding: 14px 18px; border-bottom: 1px solid #f0f4f8; }
+.extracted-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 12px; font-weight: 700; color: #1a3a5c; text-transform: uppercase; letter-spacing: 0.4px; }
+.btn-edit-toggle { background: none; border: 1px solid #ddd; border-radius: 6px; padding: 3px 10px; font-size: 11px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; color: #555; }
+.btn-edit-toggle :deep(svg) { width: 12px; height: 12px; fill: currentColor; }
+.btn-edit-toggle:hover { background: #f0f4f8; }
+.extracted-grid { display: flex; flex-direction: column; gap: 6px; }
+.ext-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid #f9fafb; font-size: 13px; }
+.ext-key { min-width: 130px; color: #888; font-size: 11px; text-transform: capitalize; flex-shrink: 0; }
+.ext-val { color: #1a1a2e; font-weight: 600; flex: 1; }
+.ext-input { flex: 1; padding: 4px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; outline: none; }
+
+/* Extracted table (spreadsheet/word) ï¿½ same style as file preview */
+.extracted-table-wrap {
+  max-height: 360px;
+  overflow: auto;
+  border: 1px solid #e9ecef;
+  border-radius: 6px;
+}
+
+/* DOCX formatted output */
+.extracted-table-wrap :deep(.docx-body) {
+  padding: 16px 20px;
+  font-family: 'Segoe UI', Calibri, sans-serif;
+  font-size: 13px;
+  color: #1a1a2e;
+  line-height: 1.7;
+}
+.extracted-table-wrap :deep(.docx-title) {
+  font-size: 18px;
+  font-weight: 800;
+  color: #1a3a5c;
+  margin: 0 0 8px;
+  text-align: center;
+}
+.extracted-table-wrap :deep(.docx-h) {
+  font-size: 14px;
+  font-weight: 700;
+  color: #1a3a5c;
+  margin: 14px 0 6px;
+  border-bottom: 1px solid #e9ecef;
+  padding-bottom: 4px;
+}
+.extracted-table-wrap :deep(.docx-p) {
+  margin: 4px 0;
+  text-align: justify;
+}
+.extracted-table-wrap :deep(.docx-li) {
+  margin: 2px 0 2px 20px;
+  list-style-type: disc;
+  display: list-item;
+}
+.extracted-table-wrap :deep(br) {
+  display: block;
+  margin: 4px 0;
+  content: '';
+}
+
+/* OCR multi-column row */
+.extracted-table-wrap :deep(.ocr-row) {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid #f0f4f8;
+  padding: 3px 0;
+}
+.extracted-table-wrap :deep(.ocr-cell) {
+  flex: 1;
+  padding: 2px 8px;
+  font-size: 12px;
+  border-right: 1px solid #e9ecef;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.extracted-table-wrap :deep(.ocr-cell:last-child) {
+  border-right: none;
+}
+.ext-input:focus { border-color: #1a3a5c; }
+.no-data { color: #aaa; font-size: 13px; text-align: center; padding: 16px; }
+
+/* Raw text */
+.raw-text-details { padding: 0 18px 10px; }
+.raw-text-details summary { font-size: 12px; color: #888; cursor: pointer; padding: 6px 0; }
+.raw-text { font-size: 11px; color: #555; background: #f8f9fa; border-radius: 6px; padding: 10px; max-height: 150px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; margin: 6px 0 0; }
+
+/* Actions */
+.preview-actions { display: flex; align-items: center; gap: 10px; padding: 14px 18px; }
+.btn { padding: 8px 16px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.btn-primary { background: #1a6b3c; color: #fff; }
+.btn-primary:hover:not(:disabled) { background: #27ae60; }
+.btn-primary:disabled { background: #a0c4b0; cursor: not-allowed; }
+.btn-secondary { background: #f0f4f8; color: #555; border: 1px solid #ddd; }
+.btn-export-excel { background: #217346; color: #fff; }
+.btn-export-excel:hover { background: #1a5c38; }
+.btn-export-word { background: #2b579a; color: #fff; }
+.btn-export-word:hover { background: #1e3f73; }
+.saved-badge { font-size: 13px; color: #27ae60; font-weight: 600; }
+
+/* Empty preview */
+.empty-preview-col { display: flex; align-items: center; justify-content: center; min-height: 300px; }
+.empty-preview { display: flex; flex-direction: column; align-items: center; gap: 10px; color: #aaa; }
+.empty-icon { width: 48px; height: 48px; }
+.empty-icon :deep(svg) { width: 48px; height: 48px; fill: #ccc; }
+.empty-preview p { font-size: 14px; margin: 0; }
 </style>

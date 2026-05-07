@@ -157,7 +157,7 @@ async function handleSignup() {
         </div>
 
         <div class="form-group">
-          <label>Password <span class="req">*</span></label>
+          <label>Biometrics Number <span class="req">*</span></label>
           <div class="input-wrapper" :class="{ 'has-error': fieldErrors.password }">
             <span class="input-icon" v-html="svgIcons.lock"></span>
             <input v-model="form.password" :type="showPassword ? 'text' : 'password'"
@@ -177,11 +177,11 @@ async function handleSignup() {
         </div>
 
         <div class="form-group">
-          <label>Confirm Password <span class="req">*</span></label>
+          <label>Confirm Biometrics Number <span class="req">*</span></label>
           <div class="input-wrapper" :class="{ 'has-error': fieldErrors.confirmPassword }">
             <span class="input-icon" v-html="svgIcons.lock"></span>
             <input v-model="form.confirmPassword" :type="showConfirm ? 'text' : 'password'"
-              placeholder="Re-enter password" maxlength="50"
+              placeholder="Re-enter biometrics number" maxlength="50"
               autocomplete="new-password" :disabled="loading" />
             <button type="button" class="show-pwd" @click="showConfirm = !showConfirm">
               <span class="show-pwd-icon" v-html="showConfirm ? svgIcons.eyeOff : svgIcons.eye"></span>

@@ -29,6 +29,9 @@ const records = ref([
 const nextId = ref(3)
 const search = ref('')
 const filterStatus = ref('')
+const filterDept   = ref('')
+const filterDateFrom = ref('')
+const filterDateTo   = ref('')
 const showForm = ref(false)
 const editId = ref(null)
 
@@ -77,10 +80,37 @@ function deleteRec(id) { if (confirm('Delete?')) records.value = records.value.f
 
 const filtered = computed(() => records.value.filter(r => {
   const q = search.value.toLowerCase()
-  const matchSearch = !q || r.employeeName.toLowerCase().includes(q)
+  const matchSearch = !q || r.employeeName.toLowerCase().includes(q) || r.destination.toLowerCase().includes(q)
   const matchStatus = !filterStatus.value || r.status === filterStatus.value
-  return matchSearch && matchStatus
+  const matchDept   = !filterDept.value   || r.department === filterDept.value
+  const matchFrom   = !filterDateFrom.value || r.dateFrom >= filterDateFrom.value
+  const matchTo     = !filterDateTo.value   || r.dateTo   <= filterDateTo.value
+  return matchSearch && matchStatus && matchDept && matchFrom && matchTo
 }))
+
+function printRecords() {
+  const rows = filtered.value.map(r =>
+    `<tr><td>${r.employeeName}</td><td>${r.department}</td><td>${r.destination}</td><td>${r.purpose}</td><td>${r.dateFrom}</td><td>${r.dateTo}</td><td>${r.days}</td><td>${r.transport}</td><td>${r.status}</td></tr>`
+  ).join('')
+  const logoUrl = window.location.origin + '/GEAMH LOGO.png'
+  const html = `<html><head><title>Travel Orders</title><style>
+    body{font-family:Arial,sans-serif;padding:24px}
+    .ph{display:flex;align-items:center;gap:14px;border-bottom:2px solid #1a3a5c;padding-bottom:10px;margin-bottom:14px}
+    .ph img{width:60px;height:60px;border-radius:50%;object-fit:cover;border:2px solid #1a6b3c}
+    .ph h2{margin:0;font-size:15px;color:#1a3a5c}.ph p{margin:2px 0 0;font-size:11px;color:#555}
+    .meta{font-size:11px;color:#888;margin-bottom:12px}
+    table{border-collapse:collapse;width:100%}th,td{border:1px solid #ddd;padding:6px;font-size:12px}th{background:#1a3a5c;color:#fff}
+    tr:nth-child(even){background:#f9fafb}
+  </style></head><body>
+    <div class="ph"><img src="${logoUrl}" alt="GEAMH"/><div><h2>General Emilio Aguinaldo Memorial Hospital</h2><p>Human Resource Information System (HRIS)</p></div></div>
+    <div class="meta">Travel Orders &mdash; Printed: ${new Date().toLocaleString('en-PH',{hour12:true})}</div>
+    <table><thead><tr><th>Employee</th><th>Dept</th><th>Destination</th><th>Purpose</th><th>From</th><th>To</th><th>Days</th><th>Transport</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table>
+    <script>window.onload=function(){window.print()}<\/script>
+  </body></html>`
+  const w = window.open('', '_blank')
+  w.document.write(html)
+  w.document.close()
+}
 
 function statusClass(s) {
   return s === 'Approved' ? 'badge-green' : s === 'Pending' ? 'badge-orange' : 'badge-red'
@@ -93,16 +123,20 @@ function statusClass(s) {
       <div class="toolbar-left">
         <div class="search-wrap">
           <span class="icon-svg search-icon" v-html="svgIcons.search"></span>
-          <input v-model="search" class="search-input" placeholder="Search employee..." />
+          <input v-model="search" class="search-input" placeholder="Search employee, destination..." />
         </div>
         <AppSelect
           v-model="filterStatus"
           :options="[{ label: 'All Status', value: '' }, { label: 'Pending', value: 'Pending' }, { label: 'Approved', value: 'Approved' }, { label: 'Disapproved', value: 'Disapproved' }]"
           placeholder="All Status"
         />
+        <input v-model="filterDept" class="filter-input" placeholder="Filter department..." />
+        <input v-model="filterDateFrom" type="date" class="filter-input" title="Date From" />
+        <input v-model="filterDateTo"   type="date" class="filter-input" title="Date To" />
       </div>
       <div class="toolbar-right">
         <span class="record-count">{{ filtered.length }} record(s)</span>
+        <button class="btn btn-print" @click="printRecords">🖨 Print</button>
         <button class="btn btn-primary" @click="openAdd">
           <span class="icon-svg" v-html="svgIcons.add"></span> Add T.O.
         </button>

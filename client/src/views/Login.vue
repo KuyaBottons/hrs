@@ -58,7 +58,7 @@ async function handleLogin() {
         </div>
 
         <div class="form-group">
-          <label>Password</label>
+          <label>Biometrics Number</label>
           <div class="input-wrapper">
             <span class="input-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="#1a6b3c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
@@ -69,7 +69,7 @@ async function handleLogin() {
             <input
               v-model="password"
               :type="showPassword ? 'text' : 'password'"
-              placeholder="Enter password"
+              placeholder="Enter biometrics number (min. 6 digits)"
               autocomplete="current-password"
               :disabled="loading"
             />

@@ -2,9 +2,11 @@
 import { ref, computed } from 'vue'
 import { useScheduleStore } from '@/stores/schedule'
 import { useEmployeeStore } from '@/stores/employees'
+import { useAuthStore } from '@/stores/auth'
 
 const store    = useScheduleStore()
 const empStore = useEmployeeStore()
+const auth     = useAuthStore()
 
 // ── Icons ────────────────────────────────────────────────────────────────────
 const svgIcons = {
@@ -184,16 +186,37 @@ async function confirmDelete() {
   }
 }
 
+// ── Approval workflow ─────────────────────────────────────────────────────────
+// Schedules need approval before they can be edited
+// Status: Pending → Approved / Rejected
+const filterApproval = ref('')
+
+function approveSchedule(s) {
+  store.updateSchedule(s.id, { ...s, approvalStatus: 'Approved', approvedBy: 'HR AMELA', approvedAt: auth.nowTimestamp() })
+}
+function rejectSchedule(s) {
+  store.updateSchedule(s.id, { ...s, approvalStatus: 'Rejected' })
+}
+
+// Only allow editing approved schedules
+function canEditSchedule(s) {
+  return !s.approvalStatus || s.approvalStatus === 'Approved'
+}
+
+function approvalBadge(s) {
+  if (!s.approvalStatus || s.approvalStatus === 'Pending') return 'badge-orange'
+  if (s.approvalStatus === 'Approved') return 'badge-green'
+  return 'badge-red'
+}
 // ── Filtered table list ───────────────────────────────────────────────────────
 const filtered = computed(() =>
   store.schedules.filter(s => {
     const q = search.value.toLowerCase()
-    const matchSearch = !q ||
-      s.employeeName.toLowerCase().includes(q) ||
-      s.employeeNo.toLowerCase().includes(q)
-    const matchDept  = !filterDept.value  || s.department === filterDept.value
-    const matchShift = !filterShift.value || s.shift === filterShift.value
-    return matchSearch && matchDept && matchShift
+    const matchSearch = !q || s.employeeName.toLowerCase().includes(q) || s.employeeNo.toLowerCase().includes(q)
+    const matchDept     = !filterDept.value     || s.department === filterDept.value
+    const matchShift    = !filterShift.value    || s.shift === filterShift.value
+    const matchApproval = !filterApproval.value || (s.approvalStatus || 'Pending') === filterApproval.value
+    return matchSearch && matchDept && matchShift && matchApproval
   })
 )
 
@@ -226,6 +249,11 @@ function shiftColor(shift) {
           :options="[{ label: 'All Shifts', value: '' }, ...store.shifts.map(s => ({ label: s, value: s }))]"
           placeholder="All Shifts"
         />
+        <AppSelect
+          v-model="filterApproval"
+          :options="[{ label: 'All Approval', value: '' }, { label: 'Pending', value: 'Pending' }, { label: 'Approved', value: 'Approved' }, { label: 'Rejected', value: 'Rejected' }]"
+          placeholder="All Approval"
+        />
       </div>
       <div class="toolbar-right">
         <span class="record-count">{{ filtered.length }} schedule(s)</span>
@@ -242,7 +270,7 @@ function shiftColor(shift) {
           <tr>
             <th>Employee</th><th>Department</th><th>Shift</th>
             <th>Shift Time</th><th>Days</th><th>Effective Date</th>
-            <th>End Date</th><th>Rest Day</th><th>Actions</th>
+            <th>End Date</th><th>Rest Day</th><th>Approval</th><th>Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -267,8 +295,18 @@ function shiftColor(shift) {
             <td>{{ s.endDate }}</td>
             <td class="rest-day">{{ s.restDay }}</td>
             <td>
+              <div class="approval-cell">
+                <span class="badge" :class="approvalBadge(s)">{{ s.approvalStatus || 'Pending' }}</span>
+                <div v-if="!s.approvalStatus || s.approvalStatus === 'Pending'" class="approval-btns">
+                  <button class="btn-approve" @click="approveSchedule(s)" title="Approve">✓</button>
+                  <button class="btn-reject"  @click="rejectSchedule(s)"  title="Reject">✗</button>
+                </div>
+                <div v-if="s.approvalStatus === 'Approved'" class="approved-by">by {{ s.approvedBy }}</div>
+              </div>
+            </td>
+            <td>
               <div class="action-btns">
-                <button class="btn-icon" @click="openEdit(s)">
+                <button class="btn-icon" @click="openEdit(s)" :disabled="!canEditSchedule(s)" :title="canEditSchedule(s) ? 'Edit' : 'Needs approval first'">
                   <span class="icon-svg" v-html="svgIcons.edit"></span>
                 </button>
                 <button class="btn-icon danger" @click="promptDelete(s)">
@@ -526,6 +564,14 @@ function shiftColor(shift) {
 .btn-icon { background:none; border:none; cursor:pointer; padding:3px; border-radius:4px; display:inline-flex; align-items:center; }
 .btn-icon:hover { background:#f0f4f8; }
 .btn-icon.danger:hover { background:#fdecea; }
+.btn-icon:disabled { opacity:0.3; cursor:not-allowed; }
+.approval-cell { display:flex; flex-direction:column; gap:4px; }
+.approval-btns { display:flex; gap:4px; }
+.btn-approve { background:#eafaf1; color:#27ae60; border:1px solid #27ae60; border-radius:4px; padding:2px 8px; font-size:11px; font-weight:700; cursor:pointer; }
+.btn-approve:hover { background:#27ae60; color:#fff; }
+.btn-reject  { background:#fdecea; color:#e74c3c; border:1px solid #e74c3c; border-radius:4px; padding:2px 8px; font-size:11px; font-weight:700; cursor:pointer; }
+.btn-reject:hover  { background:#e74c3c; color:#fff; }
+.approved-by { font-size:10px; color:#888; }
 .empty-row { text-align:center; color:#aaa; padding:40px; }
 
 /* Modal */

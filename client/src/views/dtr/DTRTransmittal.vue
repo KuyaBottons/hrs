@@ -14,6 +14,8 @@ const svgIcons = {
   document: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>`,
   save: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>`,
   close: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>`,
+  print: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 8H5c-1.66 0-3 1.34-3 3v6h4v4h12v-4h4v-6c0-1.66-1.34-3-3-3zm-3 11H8v-5h8v5zm3-7c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-1-9H6v4h12V3z"/></svg>`,
+  download: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>`,
 }
 
 const activeTab = ref('records') // 'records' | 'history'
@@ -100,9 +102,18 @@ function save() {
 }
 
 function addHistory(action, rec) {
+  const d = new Date()
+  const mm = String(d.getMonth()+1).padStart(2,'0')
+  const dd = String(d.getDate()).padStart(2,'0')
+  const yyyy = d.getFullYear()
+  const hh = String(d.getHours()%12||12).padStart(2,'0')
+  const min = String(d.getMinutes()).padStart(2,'0')
+  const sec = String(d.getSeconds()).padStart(2,'0')
+  const ampm = d.getHours()<12?'AM':'PM'
+  const ts = `${mm}/${dd}/${yyyy}, ${hh}:${min}:${sec} ${ampm}`
   dtrHistory.value.unshift({
     id: Date.now(),
-    timestamp: new Date().toLocaleString('en-PH', { hour12: false }),
+    timestamp: ts,
     user: auth.currentUser?.name || 'HR Admin',
     action,
     employeeNo: rec.employeeNo,
@@ -133,6 +144,125 @@ const filtered = computed(() => store.dtrRecords.filter(r => {
 function statusClass(s) {
   const map = { Pending: 'badge-orange', Submitted: 'badge-blue', Received: 'badge-green', Verified: 'badge-purple', Returned: 'badge-red' }
   return map[s] || 'badge-gray'
+}
+
+// ── Print ────────────────────────────────────────────────────────────────────
+function printRecords() {
+  const rows = filtered.value.map(r => `
+    <tr>
+      <td>${r.employeeNo}</td>
+      <td>${r.employeeName}</td>
+      <td>${r.department || '—'}</td>
+      <td>${r.period}</td>
+      <td>${r.transmittalType}</td>
+      <td>${r.submittedBy || '—'}</td>
+      <td>${r.dateSubmitted || '—'}</td>
+      <td>${r.dateReceived || '—'}</td>
+      <td>${r.verifiedBy || '—'}</td>
+      <td>${r.status}</td>
+      <td>${r.remarks || '—'}</td>
+    </tr>`).join('')
+  openPrintWindow('DTR Transmittal Records', `
+    <table border="1" cellpadding="6" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead style="background:#1a3a5c;color:#fff;">
+        <tr>
+          <th>Emp No</th><th>Employee Name</th><th>Department</th><th>Period</th>
+          <th>Type</th><th>Submitted By</th><th>Date Submitted</th>
+          <th>Date Received</th><th>Verified By</th><th>Status</th><th>Remarks</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`)
+}
+
+function printHistory() {
+  const rows = filteredHistory.value.map(h => `
+    <tr>
+      <td>${h.timestamp}</td>
+      <td>${h.user}</td>
+      <td>${h.action}</td>
+      <td>${h.employeeNo}</td>
+      <td>${h.employeeName}</td>
+      <td>${h.period}</td>
+      <td>${h.type}</td>
+      <td>${h.status}</td>
+      <td>${h.remarks || '—'}</td>
+    </tr>`).join('')
+  openPrintWindow('DTR Transmittal History', `
+    <table border="1" cellpadding="6" cellspacing="0" style="width:100%;border-collapse:collapse;font-size:12px;">
+      <thead style="background:#1a3a5c;color:#fff;">
+        <tr>
+          <th>Timestamp</th><th>Processed By</th><th>Action</th><th>Emp No</th>
+          <th>Employee Name</th><th>Period</th><th>Type</th><th>Status</th><th>Remarks</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`)
+}
+
+function openPrintWindow(title, tableHtml) {
+  const logoUrl = window.location.origin + '/GEAMH LOGO.png'
+  const win = window.open('', '_blank', 'width=1100,height=700')
+  win.document.write(`
+    <!DOCTYPE html><html><head>
+      <title>${title}</title>
+      <style>
+        body { font-family: Arial, sans-serif; padding: 24px; }
+        .print-header { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; border-bottom: 2px solid #1a3a5c; padding-bottom: 12px; }
+        .print-logo { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; border: 2px solid #1a6b3c; }
+        .print-org { display: flex; flex-direction: column; }
+        .print-org h2 { margin: 0; font-size: 16px; color: #1a3a5c; }
+        .print-org p  { margin: 2px 0 0; font-size: 12px; color: #555; }
+        .print-meta { font-size: 11px; color: #888; margin-bottom: 14px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 7px 10px; border: 1px solid #ccc; text-align: left; font-size: 12px; }
+        thead tr { background: #1a3a5c; color: #fff; }
+        tbody tr:nth-child(even) { background: #f9fafb; }
+        @media print { body { padding: 0; } }
+      </style>
+    </head><body>
+      <div class="print-header">
+        <img class="print-logo" src="${logoUrl}" alt="GEAMH Logo" />
+        <div class="print-org">
+          <h2>General Emilio Aguinaldo Memorial Hospital</h2>
+          <p>Human Resource Information System (HRIS)</p>
+        </div>
+      </div>
+      <div class="print-meta">${title} &mdash; Printed: ${new Date().toLocaleString('en-PH', { hour12: true })}</div>
+      ${tableHtml}
+      <script>window.onload = function(){ window.print(); }<\/script>
+    </body></html>`)
+  win.document.close()
+}
+
+// ── Download CSV ─────────────────────────────────────────────────────────────
+function downloadRecordsCSV() {
+  const headers = ['Emp No','Employee Name','Department','Period','Type','Submitted By','Date Submitted','Date Received','Verified By','Status','Remarks']
+  const rows = filtered.value.map(r => [
+    r.employeeNo, r.employeeName, r.department, r.period, r.transmittalType,
+    r.submittedBy, r.dateSubmitted, r.dateReceived || '', r.verifiedBy || '', r.status, r.remarks || ''
+  ])
+  downloadCSV('DTR_Records', headers, rows)
+}
+
+function downloadHistoryCSV() {
+  const headers = ['Timestamp','Processed By','Action','Emp No','Employee Name','Period','Type','Status','Remarks']
+  const rows = filteredHistory.value.map(h => [
+    h.timestamp, h.user, h.action, h.employeeNo, h.employeeName, h.period, h.type, h.status, h.remarks || ''
+  ])
+  downloadCSV('DTR_History', headers, rows)
+}
+
+function downloadCSV(filename, headers, rows) {
+  const escape = v => `"${String(v).replace(/"/g, '""')}"`
+  const csv = [headers.map(escape).join(','), ...rows.map(r => r.map(escape).join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = `${filename}_${new Date().toISOString().split('T')[0]}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
 }
 </script>
 
@@ -170,6 +300,12 @@ function statusClass(s) {
         </div>
         <div class="toolbar-right">
           <span class="record-count">{{ filtered.length }} record(s)</span>
+          <button class="btn btn-print" @click="printRecords">
+            <span class="icon-svg" v-html="svgIcons.print"></span> Print
+          </button>
+          <button class="btn btn-download" @click="downloadRecordsCSV">
+            <span class="icon-svg" v-html="svgIcons.download"></span> Download
+          </button>
           <button class="btn btn-blue" @click="openAdd">
             <span class="icon-svg" v-html="svgIcons.add"></span> Add DTR Record
           </button>
@@ -254,6 +390,12 @@ function statusClass(s) {
         </div>
         <div class="toolbar-right">
           <span class="record-count">{{ filteredHistory.length }} record(s)</span>
+          <button class="btn btn-print" @click="printHistory">
+            <span class="icon-svg" v-html="svgIcons.print"></span> Print
+          </button>
+          <button class="btn btn-download" @click="downloadHistoryCSV">
+            <span class="icon-svg" v-html="svgIcons.download"></span> Download
+          </button>
         </div>
       </div>
 
@@ -401,6 +543,10 @@ function statusClass(s) {
 .btn-primary { background: #1a6b3c; color: #fff; }
 .btn-blue { background: #1a3a5c; color: #fff; }
 .btn-blue:hover { background: #2980b9; }
+.btn-print { background: #6c757d; color: #fff; }
+.btn-print:hover { background: #5a6268; }
+.btn-download { background: #27ae60; color: #fff; }
+.btn-download:hover { background: #1e8449; }
 .btn-secondary { background: #f0f4f8; color: #1a6b3c; border: 1px solid #ddd; }
 .table-wrapper { overflow-x: auto; overflow-y: auto; max-height: 60vh; background: #fff; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.07); }
 .data-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 12px; }

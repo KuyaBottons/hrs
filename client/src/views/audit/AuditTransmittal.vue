@@ -17,7 +17,7 @@ const svgIcons = {
   money: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/></svg>`,
 }
 
-const activeTab = ref('summary') // 'summary' | 'history'
+const activeTab = ref('summary')
 const filterModule = ref('all')
 const search = ref('')
 const sortBy = ref('timestamp')
@@ -99,23 +99,26 @@ function moduleBg(m) {
   const map = { DTR: '#ebf5fb', Leave: '#fef3e2', Payroll: '#eafaf1', Employee: '#f5eef8', 'T.O.': '#fdecea', Auth: '#e8f5ee' }
   return map[m] || '#f4f4f4'
 }
+
+function formatTimestamp(raw) {
+  if (!raw) return '—'
+  const d = new Date(raw)
+  if (isNaN(d.getTime())) return raw
+  const mm   = String(d.getMonth() + 1).padStart(2, '0')
+  const dd   = String(d.getDate()).padStart(2, '0')
+  const yyyy = d.getFullYear()
+  const hh   = String(d.getHours() % 12 || 12).padStart(2, '0')
+  const min  = String(d.getMinutes()).padStart(2, '0')
+  const sec  = String(d.getSeconds()).padStart(2, '0')
+  const ampm = d.getHours() < 12 ? 'AM' : 'PM'
+  return `${mm}/${dd}/${yyyy}, ${hh}:${min}:${sec} ${ampm}`
+}
 </script>
 
 <template>
   <div class="page">
-    <!-- Tabs -->
-    <div class="tab-bar">
-      <button class="tab-btn" :class="{ active: activeTab === 'summary' }" @click="activeTab = 'summary'">
-        📊 Transmittal Summary
-      </button>
-      <button class="tab-btn" :class="{ active: activeTab === 'history' }" @click="activeTab = 'history'">
-        🕐 Audit History
-        <span class="history-count">{{ allLogs.length }}</span>
-      </button>
-    </div>
-
-    <!-- Summary Tab -->
-    <div v-if="activeTab === 'summary'">
+    <!-- Summary only — no tabs -->
+    <div>
       <div class="summary-section">
         <div class="summary-grid">
           <div class="sum-card blue">
@@ -171,77 +174,15 @@ function moduleBg(m) {
             <div class="recent-module-dot" :style="{ background: moduleColor(l.module) }"></div>
             <div class="recent-info">
               <strong>{{ l.action }}</strong> — {{ l.details }}
-              <div class="recent-meta">{{ l.user }} · {{ l.timestamp }}</div>
+              <div class="recent-meta">{{ l.user }} · {{ formatTimestamp(l.timestamp) }}</div>
             </div>
             <span class="module-badge" :style="{ background: moduleBg(l.module), color: moduleColor(l.module) }">{{ l.module }}</span>
           </div>
         </div>
-        <button class="view-all-btn" @click="activeTab = 'history'">View Full Audit History →</button>
+        <button class="view-all-btn" style="display:none"></button>
       </div>
     </div>
 
-    <!-- History Tab -->
-    <div v-if="activeTab === 'history'">
-      <div class="toolbar">
-        <div class="toolbar-left">
-          <div class="search-wrap">
-            <span class="icon-svg search-icon" v-html="svgIcons.search"></span>
-            <input v-model="search" class="search-input" placeholder="Search action, user, details..." />
-          </div>
-          <AppSelect
-            v-model="filterModule"
-            :options="modules.map(m => ({ label: m === 'all' ? 'All Modules' : m, value: m }))"
-          />
-          <button class="archive-toggle-btn" :class="{ active: showArchived }" @click="showArchived = !showArchived">
-            {{ showArchived ? '📂 Archived' : '📋 Active' }}
-          </button>
-        </div>
-        <div class="toolbar-right">
-          <span class="record-count">{{ filtered.length }} record(s)</span>
-          <span v-if="archivedIds.size > 0" class="archived-count">{{ archivedIds.size }} archived</span>
-        </div>
-      </div>
-
-      <div class="table-wrapper">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th @click="toggleSort('timestamp')" class="sortable">Timestamp {{ sortIcon('timestamp') }}</th>
-              <th @click="toggleSort('user')" class="sortable">User {{ sortIcon('user') }}</th>
-              <th @click="toggleSort('module')" class="sortable">Module {{ sortIcon('module') }}</th>
-              <th @click="toggleSort('action')" class="sortable">Action {{ sortIcon('action') }}</th>
-              <th>Details</th>
-              <th>Status</th>
-              <th>Archive</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-if="filtered.length === 0"><td colspan="7" class="empty-row">No audit records found.</td></tr>
-            <tr v-for="l in filtered" :key="l.id" :class="{ 'archived-row': archivedIds.has(l.id) }">
-              <td class="timestamp">{{ l.timestamp }}</td>
-              <td>{{ l.user }}</td>
-              <td>
-                <span class="module-badge"
-                  :style="{ background: moduleBg(l.module), color: moduleColor(l.module) }">
-                  {{ l.module }}
-                </span>
-              </td>
-              <td><strong>{{ l.action }}</strong></td>
-              <td class="details-cell">{{ l.details }}</td>
-              <td><span class="badge badge-green">{{ l.status }}</span></td>
-              <td>
-                <button v-if="!archivedIds.has(l.id)" class="btn-archive" @click="archiveLog(l.id)" title="Archive this log">
-                  📥 Archive
-                </button>
-                <button v-else class="btn-restore" @click="restoreLog(l.id)" title="Restore this log">
-                  ↩ Restore
-                </button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
   </div>
 </template>
 
