@@ -99,11 +99,6 @@ async function handleLogin() {
         </button>
       </form>
 
-      <div class="signup-link">
-        Don't have an account?
-        <router-link to="/signup">Create one →</router-link>
-      </div>
-
       <div class="login-footer">
         <span>© 2026 GEAMH — IT / HR Division</span>
       </div>
@@ -286,17 +281,4 @@ async function handleLogin() {
   font-size: 11px;
   color: #aaa;
 }
-.signup-link {
-  text-align: center;
-  margin-top: 16px;
-  font-size: 13px;
-  color: #555;
-}
-.signup-link a {
-  color: #1a6b3c;
-  font-weight: 700;
-  text-decoration: none;
-  margin-left: 4px;
-}
-.signup-link a:hover { text-decoration: underline; }
 </style>

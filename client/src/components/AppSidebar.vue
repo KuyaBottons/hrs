@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watchEffect } from 'vue'
+import { ref, computed, watchEffect, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -54,19 +54,19 @@ const allMenuGroups = computed(() => [
     ],
   },
   {
-    label: 'DTR & Transmittal',
-    iconKey: 'dtrgroup',
-    items: [
-      { label: 'DTR Transmittal',       iconKey: 'dtr',   to: '/dtr' },
-      { label: 'Transmittal Summary',   iconKey: 'audit', to: '/audit' },
-    ],
-  },
-  {
     label: 'Leave & T.O.',
     iconKey: 'leavegroup',
     items: [
       { label: 'Leave Management',    iconKey: 'leave', to: '/leave' },
       { label: 'Travel Order (T.O.)', iconKey: 'to',    to: '/to' },
+    ],
+  },
+  {
+    label: 'DTR & Transmittal',
+    iconKey: 'dtrgroup',
+    items: [
+      { label: 'DTR Transmittal',       iconKey: 'dtr',   to: '/dtr' },
+      { label: 'Transmittal Summary',   iconKey: 'audit', to: '/audit' },
     ],
   },
   {
@@ -89,7 +89,13 @@ const allMenuGroups = computed(() => [
     label: 'Administration',
     iconKey: 'admin',
     items: [
-      { label: 'Audit History',      iconKey: 'audittrail',  to: '/audit-trail' },
+      { label: 'Version History',    iconKey: 'versionhist', to: '/version-history' },
+      { label: 'User Manual',        iconKey: 'usermanual',  to: '/user-manual' },
+    ],
+  }] : auth.isAdminOrAbove && !auth.isSuperAdmin ? [{
+    label: 'Administration',
+    iconKey: 'admin',
+    items: [
       { label: 'Version History',    iconKey: 'versionhist', to: '/version-history' },
       { label: 'User Manual',        iconKey: 'usermanual',  to: '/user-manual' },
     ],
@@ -108,12 +114,20 @@ const allMenuGroups = computed(() => [
 const menuGroups = allMenuGroups
 
 const collapsed = ref({})
-// Initialize collapsed state — watch menuGroups since it's computed
-watchEffect(() => {
-  menuGroups.value.forEach((_, i) => {
-    if (collapsed.value[i] === undefined) collapsed.value[i] = false
+
+function expandActiveGroup() {
+  menuGroups.value.forEach((group, i) => {
+    const hasActive = group.items.some(item => isActive(item.to))
+    if (hasActive) collapsed.value[i] = false
+    else if (collapsed.value[i] === undefined) collapsed.value[i] = true
   })
-})
+}
+
+// Initialize on mount
+watchEffect(expandActiveGroup)
+
+// Re-expand when route changes (e.g. quick action click)
+watch(() => route.path, expandActiveGroup)
 
 function toggle(i) {
   collapsed.value[i] = !collapsed.value[i]

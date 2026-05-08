@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed } from 'vue'
+import AppModal from '@/components/AppModal.vue'
 
 const svgIcons = {
   search: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>`,
@@ -58,25 +59,38 @@ function onEmployeeNameInput(e) {
 
 function openAdd() { editId.value = null; form.value = blankForm(); formErrors.value = { employeeNo: '', employeeName: '' }; showForm.value = true }
 function openEdit(r) { editId.value = r.id; form.value = { ...r }; formErrors.value = { employeeNo: '', employeeName: '' }; showForm.value = true }
+const showSaveModal = ref(false)
+
 function save() {
   formErrors.value = { employeeNo: '', employeeName: '' }
   let valid = true
-  if (!form.value.employeeNo.trim()) {
-    formErrors.value.employeeNo = 'Employee No. is required and must contain numbers only.'; valid = false
-  }
-  if (!form.value.employeeName.trim()) {
-    formErrors.value.employeeName = 'Employee Name is required and must not contain numbers.'; valid = false
-  }
+  if (!form.value.employeeNo.trim()) { formErrors.value.employeeNo = 'Employee No. is required.'; valid = false }
+  if (!form.value.employeeName.trim()) { formErrors.value.employeeName = 'Employee Name is required.'; valid = false }
   if (!valid) return
+  showSaveModal.value = true
+}
+function confirmSave() {
   if (editId.value) {
     const idx = records.value.findIndex(r => r.id === editId.value)
     if (idx !== -1) records.value[idx] = { ...records.value[idx], ...form.value }
   } else {
     records.value.push({ ...form.value, id: nextId.value++ })
   }
+  showSaveModal.value = false
   showForm.value = false
 }
-function deleteRec(id) { if (confirm('Delete?')) records.value = records.value.filter(r => r.id !== id) }
+const showDeleteModal = ref(false)
+const deleteTarget    = ref(null)
+
+function deleteRec(id) {
+  deleteTarget.value = records.value.find(r => r.id === id)
+  showDeleteModal.value = true
+}
+function confirmDelete() {
+  if (deleteTarget.value) records.value = records.value.filter(r => r.id !== deleteTarget.value.id)
+  showDeleteModal.value = false
+  deleteTarget.value = null
+}
 
 const filtered = computed(() => records.value.filter(r => {
   const q = search.value.toLowerCase()
@@ -223,6 +237,28 @@ function statusClass(s) {
         </div>
       </div>
     </div>
+    <!-- Delete Confirmation -->
+    <AppModal
+      v-if="showDeleteModal"
+      type="delete"
+      title="Delete Travel Order"
+      message="Are you sure you want to delete this travel order?"
+      :detail="deleteTarget?.employeeName + ' — ' + deleteTarget?.destination"
+      @confirm="confirmDelete"
+      @cancel="showDeleteModal = false"
+    />
+
+    <!-- Save Confirmation -->
+    <AppModal
+      v-if="showSaveModal"
+      type="confirm"
+      :title="editId ? 'Update Travel Order' : 'Add Travel Order'"
+      :message="editId ? 'Save changes to this travel order?' : 'Add this new travel order?'"
+      :detail="form.employeeName + ' — ' + form.destination"
+      :confirmLabel="editId ? 'Yes, Update' : 'Yes, Add'"
+      @confirm="confirmSave"
+      @cancel="showSaveModal = false"
+    />
   </div>
 </template>
 

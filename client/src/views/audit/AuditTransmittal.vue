@@ -38,22 +38,20 @@ function restoreLog(id) { const s = new Set(archivedIds.value); s.delete(id); ar
 
 const showArchived = ref(false)
 
-const modules = ['all', 'DTR', 'Leave', 'Payroll', 'Employee', 'T.O.', 'Auth']
+const modules = ['all', 'DTR', 'Leave', 'T.O.']
 
-// Merge built-in seed log + live auth log
+// Merge built-in seed log + live auth log — DTR, Leave, T.O. only
+const ALLOWED_MODULES = new Set(['DTR', 'Leave', 'T.O.'])
+
 const allLogs = computed(() => {
-  const live = auth.activityLog
+  const live = auth.activityLog.filter(l => ALLOWED_MODULES.has(l.module))
   const seed = [
     { id: 's1', timestamp: '4/16/2026, 09:15:00 AM', user: 'HR Admin', action: 'DTR Received', module: 'DTR', details: 'DTR of Dela Cruz, Juan S. for April 1-15, 2026 received.', status: 'OK' },
     { id: 's2', timestamp: '4/16/2026, 09:30:00 AM', user: 'Thea Villanueva', action: 'DTR Submitted', module: 'DTR', details: 'DTR of Reyes, Maria G. submitted for transmittal.', status: 'OK' },
     { id: 's3', timestamp: '4/15/2026, 02:00:00 PM', user: 'HR Admin', action: 'Leave Approved', module: 'Leave', details: 'Leave of Dela Cruz, Juan S. (VL, Apr 20-22) approved.', status: 'OK' },
-    { id: 's4', timestamp: '4/15/2026, 11:00:00 AM', user: 'HR Admin', action: 'Payroll Released', module: 'Payroll', details: 'Payroll for April 2026 released for Dela Cruz, Juan S.', status: 'OK' },
-    { id: 's5', timestamp: '4/14/2026, 04:45:00 PM', user: 'HR Admin', action: 'Employee Added', module: 'Employee', details: 'New employee Bautista, Ana C. added to masterlist.', status: 'OK' },
   ]
-  // Deduplicate by id
   const existingIds = new Set(live.map(l => l.id))
-  const merged = [...live, ...seed.filter(s => !existingIds.has(s.id))]
-  return merged
+  return [...live, ...seed.filter(s => !existingIds.has(s.id))]
 })
 
 const filtered = computed(() => {

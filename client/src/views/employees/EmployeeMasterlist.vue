@@ -2,12 +2,10 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useEmployeeStore } from '@/stores/employees'
-import { useAuthStore } from '@/stores/auth'
 import AppSelect from '@/components/AppSelect.vue'
 
 const router = useRouter()
 const store  = useEmployeeStore()
-const auth   = useAuthStore()
 
 const search       = ref('')
 const filterDept   = ref('')
@@ -17,65 +15,6 @@ const filterGroup  = ref('')
 const sortBy       = ref('lastName')
 const sortDir      = ref('asc')
 function resetPage() {}
-
-// ── Version History ──────────────────────────────────────────────────────────
-const HISTORY_KEY = 'emp_version_history'
-const versionHistory = ref(JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]'))
-
-// Track which employee IDs have been edited (have history entries)
-const editedIds = computed(() => new Set(versionHistory.value.map(h => h.employeeId)))
-
-function saveVersionEntry(emp, type = 'Edited') {
-  const entry = {
-    id:           Date.now(),
-    employeeId:   emp.id,
-    employeeName: `${emp.lastName}, ${emp.firstName}`,
-    editedBy:     auth.currentUser?.name || 'System',
-    editedAt:     auth.nowTimestamp(),
-    type,
-    snapshot:     { ...emp },
-  }
-  const all = [entry, ...versionHistory.value].slice(0, 200)
-  versionHistory.value = all
-  localStorage.setItem(HISTORY_KEY, JSON.stringify(all))
-}
-
-// History panel
-const showHistory       = ref(false)
-const showAllHistory    = ref(false)  // show all employees' history
-const historyTarget     = ref(null)
-const showSnapshot      = ref(false)
-const snapshotData      = ref(null)
-
-function openHistory(emp) {
-  historyTarget.value  = emp
-  showAllHistory.value = false
-  showHistory.value    = true
-}
-
-function openAllHistory() {
-  historyTarget.value  = null
-  showAllHistory.value = true
-  showHistory.value    = true
-}
-
-function closeHistory() {
-  showHistory.value    = false
-  historyTarget.value  = null
-  showAllHistory.value = false
-}
-
-const empHistory = computed(() => {
-  if (showAllHistory.value) return versionHistory.value
-  return historyTarget.value
-    ? versionHistory.value.filter(h => h.employeeId === historyTarget.value.id)
-    : []
-})
-
-function viewSnapshot(entry) {
-  snapshotData.value = entry
-  showSnapshot.value = true
-}
 
 // ── Delete modal ─────────────────────────────────────────────────────────────
 const showDeleteModal = ref(false)
@@ -97,13 +36,14 @@ function cancelDelete() {
 }
 
 function confirmDelete() {
-  if (deleteTarget.value) store.deleteEmployee(deleteTarget.value.id)
+  if (deleteTarget.value) {
+    store.deleteEmployee(deleteTarget.value.id)
+  }
   cancelDelete()
 }
 
-// ── Navigate to edit — save "Previous" snapshot first ────────────────────────
+// ── Navigate to edit ─────────────────────────────────────────────────────────
 function goEdit(emp) {
-  saveVersionEntry(emp, 'Previous')
   router.push(`/employees/${emp.id}/edit`)
 }
 
@@ -114,9 +54,7 @@ const svgIcons = {
   edit:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
   delete:  '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
   warn:    '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
-  history: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>',
   close:   '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-  eye:     '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
 }
 
 function toggleSort(col) {
@@ -162,13 +100,10 @@ function sortIcon(col) {
   if (sortBy.value !== col) return '↕'
   return sortDir.value === 'asc' ? '↑' : '↓'
 }
-
-// Work days display (5 days per week)
-const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
 </script>
 
 <template>
-  <div class="page" :class="{ 'panel-open': showHistory }">
+  <div class="page">
 
     <!-- ── Toolbar ─────────────────────────────────────────────────────────── -->
     <div class="toolbar">
@@ -184,9 +119,6 @@ const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
       </div>
       <div class="toolbar-right">
         <span class="record-count">{{ filtered.length }} record(s)</span>
-        <button class="btn btn-history" @click="openAllHistory">
-          <span class="icon-svg" v-html="svgIcons.history"></span> Version History
-        </button>
         <button class="btn btn-primary" @click="router.push('/employees/new')">
           <span class="icon-svg" v-html="svgIcons.add"></span> Add Employee
         </button>
@@ -222,7 +154,6 @@ const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
                     <strong>{{ emp.lastName }}, {{ emp.firstName }} {{ emp.middleName ? emp.middleName[0] + '.' : '' }}</strong>
                     <div class="emp-contact">{{ emp.email }}</div>
                   </div>
-                  <span v-if="editedIds.has(emp.id)" class="edited-badge">Edited</span>
                 </div>
               </td>
               <td>{{ emp.position }}</td>
@@ -234,9 +165,6 @@ const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
                   <button class="btn-icon" title="Edit" @click="goEdit(emp)">
                     <span class="icon-svg" v-html="svgIcons.edit"></span>
                   </button>
-                  <button class="btn-icon history-btn" title="Version History" @click="openHistory(emp)">
-                    <span class="icon-svg" v-html="svgIcons.history"></span>
-                  </button>
                   <button class="btn-icon danger" title="Delete" @click="promptDelete(emp)">
                     <span class="icon-svg" v-html="svgIcons.delete"></span>
                   </button>
@@ -247,56 +175,6 @@ const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
         </table>
       </div>
 
-      <!-- ── Version History Panel ──────────────────────────────────────────── -->
-      <Transition name="panel">
-        <div v-if="showHistory" class="history-panel">
-          <div class="history-header">
-            <div>
-              <h3>Version History</h3>
-              <p class="history-sub">
-                {{ showAllHistory ? 'All Employees' : (historyTarget?.lastName + ', ' + historyTarget?.firstName) }}
-              </p>
-            </div>
-            <button class="btn-icon" @click="closeHistory">
-              <span class="icon-svg" v-html="svgIcons.close"></span>
-            </button>
-          </div>
-
-          <!-- Work schedule note -->
-          <div class="work-days-note">
-            <strong>Standard Schedule:</strong>
-            <div class="work-days-row">
-              <span v-for="d in WORK_DAYS" :key="d" class="work-day-chip">{{ d }}</span>
-              <span class="work-day-rest">Sat–Sun: Rest</span>
-            </div>
-          </div>
-
-          <div v-if="empHistory.length === 0" class="history-empty">
-            No version history yet.<br>
-            <small>History is recorded each time you click Edit.</small>
-          </div>
-
-          <div v-else class="history-list">
-            <div v-for="entry in empHistory" :key="entry.id" class="history-entry">
-              <div class="history-entry-top">
-                <span class="history-type-badge" :class="entry.type === 'Edited' ? 'type-edited' : 'type-previous'">
-                  {{ entry.type === 'Edited' ? '✏️ Edited' : '📋 Previous' }}
-                </span>
-                <span class="history-date">{{ entry.editedAt }}</span>
-              </div>
-              <div class="history-entry-body">
-                <div>
-                  <span v-if="showAllHistory" class="history-emp-name">{{ entry.employeeName }}</span>
-                  <span class="history-by">by {{ entry.editedBy }}</span>
-                </div>
-                <button class="btn-view" @click="viewSnapshot(entry)">
-                  <span class="icon-svg" v-html="svgIcons.eye"></span> View
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </Transition>
     </div>
 
     <!-- ── Delete Confirmation Modal ─────────────────────────────────────── -->
@@ -324,53 +202,6 @@ const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
               <span class="icon-svg" v-html="svgIcons.delete"></span> Yes, Delete
             </button>
           </div>
-        </div>
-      </div>
-    </Transition>
-
-    <!-- ── Snapshot Viewer Modal ──────────────────────────────────────────── -->
-    <Transition name="modal">
-      <div v-if="showSnapshot" class="modal-overlay" @click.self="showSnapshot = false">
-        <div class="modal snapshot-modal">
-          <div class="snapshot-header">
-            <div>
-              <h3 class="modal-title">
-                <span class="history-type-badge" :class="snapshotData?.type === 'Edited' ? 'type-edited' : 'type-previous'">
-                  {{ snapshotData?.type }}
-                </span>
-                Snapshot
-              </h3>
-              <p class="snapshot-meta">{{ snapshotData?.editedAt }} · by {{ snapshotData?.editedBy }}</p>
-            </div>
-            <button class="btn-icon" @click="showSnapshot = false">
-              <span class="icon-svg" v-html="svgIcons.close"></span>
-            </button>
-          </div>
-          <div class="snapshot-grid" v-if="snapshotData?.snapshot">
-            <div class="snap-row"><span class="snap-label">Employee No.</span><span class="snap-val">{{ snapshotData.snapshot.employeeNo }}</span></div>
-            <div class="snap-row"><span class="snap-label">Last Name</span><span class="snap-val">{{ snapshotData.snapshot.lastName }}</span></div>
-            <div class="snap-row"><span class="snap-label">First Name</span><span class="snap-val">{{ snapshotData.snapshot.firstName }}</span></div>
-            <div class="snap-row"><span class="snap-label">Middle Name</span><span class="snap-val">{{ snapshotData.snapshot.middleName || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Position</span><span class="snap-val">{{ snapshotData.snapshot.position || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Department</span><span class="snap-val">{{ snapshotData.snapshot.department || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Status</span><span class="snap-val">{{ snapshotData.snapshot.employmentStatus }}</span></div>
-            <div class="snap-row"><span class="snap-label">Date Hired</span><span class="snap-val">{{ snapshotData.snapshot.dateHired || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Birth Date</span><span class="snap-val">{{ snapshotData.snapshot.birthDate || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Gender</span><span class="snap-val">{{ snapshotData.snapshot.gender || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Civil Status</span><span class="snap-val">{{ snapshotData.snapshot.civilStatus || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Contact No.</span><span class="snap-val">{{ snapshotData.snapshot.contactNo || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Email</span><span class="snap-val">{{ snapshotData.snapshot.email || '—' }}</span></div>
-            <div class="snap-row"><span class="snap-label">Salary</span><span class="snap-val">₱{{ Number(snapshotData.snapshot.salary || 0).toLocaleString() }}</span></div>
-            <div class="snap-row"><span class="snap-label">SG/Step</span><span class="snap-val">{{ snapshotData.snapshot.sgStep || '—' }}</span></div>
-          </div>
-          <div class="work-days-note mt">
-            <strong>Work Schedule (5 days/week):</strong>
-            <div class="work-days-row">
-              <span v-for="d in WORK_DAYS" :key="d" class="work-day-chip">{{ d }}</span>
-              <span class="work-day-rest">Sat–Sun: Rest</span>
-            </div>
-          </div>
-          <button class="btn btn-primary close-snap" @click="showSnapshot = false">Close</button>
         </div>
       </div>
     </Transition>
@@ -427,56 +258,6 @@ const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
 .history-btn:hover { background:#e8f5ee !important; }
 .empty-row { text-align:center; color:#aaa; padding:40px; }
 
-/* Edited badge */
-.edited-badge {
-  margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: 8px;
-  font-size: 10px;
-  font-weight: 700;
-  background: #ebf5fb;
-  color: #2980b9;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
-
-/* Version History Panel */
-.history-panel {
-  width: 320px;
-  flex-shrink: 0;
-  background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
-  max-height: calc(100vh - 180px);
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-}
-.history-header { display:flex; align-items:flex-start; justify-content:space-between; padding:16px 16px 12px; border-bottom:1px solid #f0f4f8; }
-.history-header h3 { margin:0 0 2px; font-size:15px; color:#1a3a5c; }
-.history-sub { margin:0; font-size:12px; color:#888; }
-.history-empty { padding:24px 16px; text-align:center; color:#aaa; font-size:13px; line-height:1.6; }
-.history-list { padding:8px 0; }
-.history-entry { padding:10px 16px; border-bottom:1px solid #f5f5f5; }
-.history-entry:last-child { border-bottom:none; }
-.history-entry-top { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
-.history-type-badge { padding:2px 8px; border-radius:8px; font-size:11px; font-weight:600; }
-.type-edited   { background:#ebf5fb; color:#2980b9; }
-.type-previous { background:#f4f4f4; color:#666; }
-.history-date { font-size:10px; color:#aaa; }
-.history-entry-body { display:flex; align-items:center; justify-content:space-between; }
-.history-by { font-size:11px; color:#555; }
-.btn-view { background:none; border:1px solid #ddd; border-radius:6px; padding:3px 8px; font-size:11px; cursor:pointer; display:inline-flex; align-items:center; gap:4px; color:#1a3a5c; }
-.btn-view:hover { background:#e8f0fe; }
-
-/* Work days */
-.work-days-note { padding:10px 16px; background:#f8f9fa; border-bottom:1px solid #f0f4f8; font-size:11px; color:#555; }
-.work-days-note strong { display:block; margin-bottom:6px; color:#1a3a5c; }
-.work-days-note.mt { margin-top:12px; border-radius:8px; border:1px solid #e9ecef; }
-.work-days-row { display:flex; gap:4px; align-items:center; flex-wrap:wrap; }
-.work-day-chip { background:#1a3a5c; color:#fff; padding:2px 8px; border-radius:6px; font-size:10px; font-weight:600; }
-.work-day-rest { font-size:10px; color:#888; margin-left:4px; }
-
 /* Panel transition */
 .panel-enter-active, .panel-leave-active { transition: opacity 0.2s ease, transform 0.2s ease; }
 .panel-enter-from, .panel-leave-to { opacity:0; transform:translateX(20px); }
@@ -501,16 +282,6 @@ const WORK_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']
 .btn-delete { flex:1; padding:10px; border-radius:8px; background:#e74c3c; color:#fff; border:none; font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:6px; }
 .btn-delete:hover { background:#c0392b; }
 .btn-delete .icon-svg :deep(svg) { fill:#fff; }
-
-/* Snapshot modal */
-.snapshot-modal { max-width:520px; align-items:stretch; text-align:left; padding:24px; }
-.snapshot-header { display:flex; align-items:flex-start; justify-content:space-between; margin-bottom:14px; }
-.snapshot-meta { font-size:11px; color:#888; margin:4px 0 0; }
-.snapshot-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
-.snap-row { display:flex; flex-direction:column; gap:2px; background:#f8f9fa; border-radius:6px; padding:8px 10px; }
-.snap-label { font-size:10px; font-weight:600; color:#888; text-transform:uppercase; }
-.snap-val { font-size:13px; color:#1a1a2e; }
-.close-snap { align-self:flex-end; margin-top:8px; }
 
 /* Modal transition */
 .modal-enter-active, .modal-leave-active { transition:opacity 0.2s ease; }

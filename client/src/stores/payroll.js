@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { useVersionHistory } from '@/composables/useVersionHistory'
 
 export const usePayrollStore = defineStore('payroll', () => {
   const payrollRecords = ref([
@@ -76,21 +77,30 @@ export const usePayrollStore = defineStore('payroll', () => {
 
   const nextId = ref(4)
 
-  const payPeriods = [
-    '2026-04', '2026-03', '2026-02', '2026-01',
+  const payPeriods = ['2026-04', '2026-03', '2026-02', '2026-01',
     '2025-12', '2025-11', '2025-10',
   ]
 
+  const { trackCreate, trackUpdate, trackDelete } = useVersionHistory()
+
   function addRecord(record) {
-    payrollRecords.value.push({ ...record, id: nextId.value++ })
+    const newRec = { ...record, id: nextId.value++ }
+    payrollRecords.value.push(newRec)
+    trackCreate('Payroll', newRec, newRec.employeeName)
   }
 
   function updateRecord(id, data) {
     const idx = payrollRecords.value.findIndex(r => r.id === id)
-    if (idx !== -1) payrollRecords.value[idx] = { ...payrollRecords.value[idx], ...data }
+    if (idx !== -1) {
+      const old = { ...payrollRecords.value[idx] }
+      payrollRecords.value[idx] = { ...old, ...data }
+      trackUpdate('Payroll', old, payrollRecords.value[idx], data.employeeName ?? old.employeeName)
+    }
   }
 
   function deleteRecord(id) {
+    const rec = payrollRecords.value.find(r => r.id === id)
+    if (rec) trackDelete('Payroll', rec, rec.employeeName)
     payrollRecords.value = payrollRecords.value.filter(r => r.id !== id)
   }
 

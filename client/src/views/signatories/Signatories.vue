@@ -1,5 +1,6 @@
 <script setup>
 import { ref } from 'vue'
+import AppModal from '@/components/AppModal.vue'
 
 const svgIcons = {
   sign: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`,
@@ -29,17 +30,31 @@ const form = ref(blankForm())
 
 function openAdd() { editId.value = null; form.value = blankForm(); showForm.value = true }
 function openEdit(s) { editId.value = s.id; form.value = { ...s }; showForm.value = true }
+const showDeleteModal = ref(false)
+const showSaveModal   = ref(false)
+const deleteTarget    = ref(null)
+
 function save() {
+  showSaveModal.value = true
+}
+function confirmSave() {
   if (editId.value) {
     const idx = signatories.value.findIndex(s => s.id === editId.value)
     if (idx !== -1) signatories.value[idx] = { ...signatories.value[idx], ...form.value }
   } else {
     signatories.value.push({ ...form.value, id: nextId.value++ })
   }
+  showSaveModal.value = false
   showForm.value = false
 }
 function deleteRec(id) {
-  if (confirm('Remove this signatory?')) signatories.value = signatories.value.filter(s => s.id !== id)
+  deleteTarget.value = signatories.value.find(s => s.id === id)
+  showDeleteModal.value = true
+}
+function confirmDelete() {
+  if (deleteTarget.value) signatories.value = signatories.value.filter(s => s.id !== deleteTarget.value.id)
+  showDeleteModal.value = false
+  deleteTarget.value = null
 }
 function toggleActive(s) {
   const idx = signatories.value.findIndex(x => x.id === s.id)
@@ -139,6 +154,29 @@ function toggleActive(s) {
         </div>
       </div>
     </div>
+
+    <!-- Delete Confirmation -->
+    <AppModal
+      v-if="showDeleteModal"
+      type="delete"
+      title="Remove Signatory"
+      message="Are you sure you want to remove this signatory?"
+      :detail="deleteTarget?.name + ' — ' + deleteTarget?.role"
+      @confirm="confirmDelete"
+      @cancel="showDeleteModal = false"
+    />
+
+    <!-- Save Confirmation -->
+    <AppModal
+      v-if="showSaveModal"
+      type="confirm"
+      :title="editId ? 'Update Signatory' : 'Add Signatory'"
+      :message="editId ? 'Save changes to this signatory?' : 'Add this new signatory?'"
+      :detail="form.name"
+      :confirmLabel="editId ? 'Yes, Update' : 'Yes, Add'"
+      @confirm="confirmSave"
+      @cancel="showSaveModal = false"
+    />
   </div>
 </template>
 

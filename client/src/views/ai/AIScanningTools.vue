@@ -83,29 +83,39 @@ async function processFiles(files) {
           uploadProgress.value = `Preprocessing image...`
           const preprocessed = await preprocessImage(file)
 
-          // Run OCR with PSM 6 (uniform block) â€” best for dense document tables
+          const isScheduleFile = /schedule/i.test(file.name)
           uploadProgress.value = `Scanning text (this may take 30-60 seconds)...`
-          const { data: ocrData } = await Tesseract.recognize(preprocessed, 'eng', {
-            logger: m => {
-              if (m.status === 'recognizing text') {
-                uploadProgress.value = `OCR progress: ${Math.round((m.progress || 0) * 100)}%`
-              }
-            },
-            tessedit_pageseg_mode:    '6',  // PSM 6 = uniform block of text (best for tables)
-            tessedit_ocr_engine_mode: '1',  // OEM 1 = LSTM neural net only
-            preserve_interword_spaces: '1',
-          })
 
-          const rawText = (ocrData.text || '').trim()
-          scan.confidence     = Math.round(ocrData.confidence)
-          scan.raw_text       = rawText
-          scan.html_table     = buildOcrHtml(rawText)
-          scan.extracted_data = parseOCRText(rawText, scan.doc_type)
+          // Multi-pass OCR: try PSM 4 and PSM 6, keep best result
+          const psmModes = isScheduleFile ? ['4', '6'] : ['6']
+          let bestText = '', bestScore = -1
+
+          for (const psm of psmModes) {
+            uploadProgress.value = `OCR pass PSM ${psm}...`
+            const { data: ocrData } = await Tesseract.recognize(preprocessed, 'eng', {
+              logger: m => {
+                if (m.status === 'recognizing text')
+                  uploadProgress.value = `OCR PSM${psm}: ${Math.round((m.progress||0)*100)}%`
+              },
+              tessedit_pageseg_mode:     psm,
+              tessedit_ocr_engine_mode:  '1',
+              preserve_interword_spaces: '1',
+            })
+            const txt   = (ocrData.text || '').trim()
+            const conf  = Math.round(ocrData.confidence)
+            const score = conf + (txt.match(/\b(85|schedule|GEAMH|department|duties)/gi)||[]).length * 3
+            if (score > bestScore) { bestScore = score; bestText = txt }
+          }
+
+          scan.confidence     = Math.min(bestScore, 99)
+          scan.raw_text       = bestText
+          scan.html_table     = buildOcrHtml(bestText)
+          scan.extracted_data = parseOCRText(bestText, scan.doc_type)
           scan.status         = scan.confidence >= 40 ? 'Processed' : 'Review Needed'
         } catch (e) {
           console.error('OCR error:', e)
-          scan.status     = 'Review Needed'
-          scan.raw_text   = 'OCR failed. Try uploading the original digital file (Excel/PDF) for better results.'
+          scan.status   = 'Review Needed'
+          scan.raw_text = 'OCR failed. Try uploading the original digital file (Excel/PDF) for better results.'
         }
       }
 
@@ -233,12 +243,18 @@ async function preprocessImage(file) {
 // -- Build formatted HTML from OCR raw text ------------------------------------
 function buildOcrHtml(text) {
   if (!text || !text.trim()) return ''
+
+  // Detect Schedule of Duties — render structured table
+  if (/schedule of duties|schedule of duty/i.test(text)) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+    return buildScheduleHtml(parseScheduleOfDuties(text, lines))
+  }
+
   const lines = text.split('\n')
   let html = '<div class="docx-body">'
   for (const line of lines) {
     const trimmed = line.trim()
     if (!trimmed) { html += '<br>'; continue }
-    // Detect if line looks like a table row (multiple whitespace-separated columns)
     const cols = trimmed.split(/\s{2,}/).filter(c => c.trim())
     if (cols.length >= 3) {
       html += '<p class="docx-p ocr-row">' +
@@ -256,21 +272,321 @@ function escHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
 }
 
+// ── Schedule of Duties parser ──────────────────────────────────────────────────
+function parseScheduleOfDuties(text, lines) {
+  const result = {
+    docType:    'Schedule of Duties',
+    hospital:   '',
+    project:    '',
+    location:   '',
+    period:     '',
+    department: '',
+    groups:     [],   // [{ label: 'KPFP', employees: [...] }]
+    legend:     {},
+    preparedBy: '', preparedByTitle: '',
+    approvedBy: '', approvedByTitle: '',
+    notedBy:    '', notedByTitle: '',
+  }
+
+  // ── Header fields ────────────────────────────────────────────────────────────
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i]
+    if (/general emilio|GEAMH/i.test(l) && !result.hospital)           result.hospital   = l.trim()
+    if (/korea|friendship|health project/i.test(l) && !result.project) result.project    = l.trim()
+    if (/trece martires|city|province/i.test(l) && !result.location)   result.location   = l.trim()
+    if (/schedule of duties/i.test(l)) {
+      // Period is usually the next non-empty line
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        if (lines[j] && /\d{4}|january|february|march|april|may|june|july|august|september|october|november|december/i.test(lines[j])) {
+          result.period = lines[j].trim(); break
+        }
+      }
+    }
+    // Department/Unit — look for the label then grab the value after it
+    if (/department[\/\s]*unit/i.test(l)) {
+      const val = l.replace(/department[\/\s]*unit[:\s]*/i, '').trim()
+      result.department = val || lines[i+1]?.trim() || ''
+    }
+    // Also catch standalone department names like "Electronic Medical Records (EMR)"
+    if (/electronic medical|EMR\b/i.test(l) && !result.department) result.department = l.trim()
+
+    // Signatories — name is 1-2 lines after the label
+    if (/prepared\s*by/i.test(l)) {
+      result.preparedBy      = lines[i+1]?.trim() || ''
+      result.preparedByTitle = lines[i+2]?.trim() || ''
+    }
+    if (/approved\s*by/i.test(l)) {
+      result.approvedBy      = lines[i+1]?.trim() || ''
+      result.approvedByTitle = lines[i+2]?.trim() || ''
+    }
+    if (/noted\s*by/i.test(l)) {
+      result.notedBy      = lines[i+1]?.trim() || ''
+      result.notedByTitle = lines[i+2]?.trim() || ''
+    }
+  }
+
+  // ── Legend ───────────────────────────────────────────────────────────────────
+  const legendMatch = text.match(/LEGEND[:\s]*([\s\S]{0,400})(?=prepared by|approved by|noted by|$)/i)
+  if (legendMatch) {
+    for (const ll of legendMatch[1].split('\n').map(l => l.trim()).filter(Boolean)) {
+      const m = ll.match(/^([A-Z0-9]+)\s*[-–]\s*(.+)$/i)
+      if (m) {
+        const key = m[1].trim().toUpperCase()
+        const val = m[2].trim()
+        // Only accept valid legend keys: 85, O, H — skip OCR noise like 86, oO, etc.
+        if (/^(85|O|H)$/.test(key)) result.legend[key] = val
+      }
+    }
+  }
+  // Always set defaults
+  if (!result.legend['85']) result.legend['85'] = '8:00am to 5:00pm'
+  if (!result.legend['O'])  result.legend['O']  = 'Off Duty'
+  if (!result.legend['H'])  result.legend['H']  = 'Holiday'
+
+  // ── Employee rows with group detection ───────────────────────────────────────
+  const SKIP = /name of employee|department\/unit|schedule of|^legend|prepared by|approved by|noted by|^signature$|no\.\s*of\s*days|^fri$|^sat$|^sun$|^mon$|^tue$|^wed$|^thu$/i
+
+  let currentGroup = { label: '', employees: [] }
+  result.groups.push(currentGroup)
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || SKIP.test(trimmed)) continue
+
+    // Group label — short all-caps word like KPFP or GEAMH
+    if (/^(KPFP|GEAMH|KP|GE|PHO|OPHO|MAB|DIALYSIS)$/i.test(trimmed)) {
+      currentGroup = { label: trimmed.toUpperCase(), employees: [] }
+      result.groups.push(currentGroup)
+      continue
+    }
+
+    // ── Aggressive employee row detection ──────────────────────────────────────
+    // OCR produces very noisy output for table cells. Strategy:
+    // 1. Find lines that start with a name-like string (letters, comma, period, space)
+    // 2. Count how many "85"-like patterns appear (even corrupted: 85, 851, 8S, 85], [85, etc.)
+    // 3. Count "O"-like patterns (O, 0, oo, [0], |0|, etc.)
+
+    // Extract name: take leading word characters until we hit digits or brackets
+    const nameMatch = trimmed.match(/^([A-Z][A-Za-z\s,\.]+?)(?=\s+[\[\(0-9OHo]|\s{2,}|$)/)
+    if (!nameMatch) continue
+    const namePart = nameMatch[1].trim()
+    if (namePart.length < 3 || /^\d/.test(namePart)) continue
+
+    const rest = trimmed.slice(namePart.length)
+
+    // Count work days: any occurrence of "85" (even inside brackets/noise)
+    const workMatches  = (rest.match(/8[5S]/g) || []).length
+    // Count off days: O, 0, [0], |0|, oo patterns
+    const offMatches   = (rest.match(/\b[Oo0]{1,2}\b|\[0\]|\|0\|/g) || []).length
+    // Count holiday: H
+    const holMatches   = (rest.match(/\bH\b/g) || []).length
+
+    const totalCodes = workMatches + offMatches + holMatches
+    if (totalCodes < 5) continue
+
+    // Extract number of days — last standalone number 1-31 in the line
+    const numMatch = rest.match(/\b([12]?\d)\b(?=[^0-9]*$)/)
+    const numDays  = numMatch ? parseInt(numMatch[1]) : workMatches
+
+    // Build schedule array: reconstruct from rest token by token
+    const codes = []
+    // Tokenize rest, normalize each token
+    const restTokens = rest.split(/[\s\[\]\(\)\|,\/\\]+/).filter(Boolean)
+    for (const tok of restTokens) {
+      const t = tok.toUpperCase()
+      if (/^8[5S]$/.test(t))       codes.push('85')
+      else if (/^[Oo0]{1,2}$/.test(t)) codes.push('O')
+      else if (/^H$/.test(t))       codes.push('H')
+    }
+
+    // Pad or trim to 31
+    while (codes.length < 31) codes.push('')
+
+    currentGroup.employees.push({
+      name:     namePart,
+      schedule: codes.slice(0, 31),
+      numDays:  numDays || workMatches,
+    })
+  }
+
+  // Remove empty groups
+  result.groups = result.groups.filter(g => g.employees.length > 0)
+
+  // Store raw text for fallback display
+  result.rawText = text
+
+  return result
+}
+
+// ── Schedule of Duties HTML renderer ──────────────────────────────────────────
+function buildScheduleHtml(parsed) {
+  const days = Array.from({ length: 31 }, (_, i) => i + 1)
+
+  // Count total employees across all groups
+  const totalEmps = parsed.groups.reduce((s, g) => s + g.employees.length, 0)
+
+  let html = `<div class="sched-doc">
+    <div class="sched-header">
+      <div class="sched-hosp">${escHtml(parsed.hospital)}</div>
+      ${parsed.project  ? `<div class="sched-sub">${escHtml(parsed.project)}</div>` : ''}
+      ${parsed.location ? `<div class="sched-sub">${escHtml(parsed.location)}</div>` : ''}
+      <div class="sched-title">Schedule of Duties</div>
+      <div class="sched-period">${escHtml(parsed.period)}</div>
+    </div>
+
+    <div class="sched-dept-row">
+      <span><strong>Department/Unit:</strong> ${escHtml(parsed.department)}</span>
+    </div>
+
+    <div class="sched-table-wrap">
+    <table class="sched-table">
+      <thead>
+        <tr class="tr-days">
+          <th rowspan="2" class="th-name">NAME OF EMPLOYEE</th>
+          ${days.map(d => `<th class="th-day">${d}</th>`).join('')}
+          <th rowspan="2" class="th-days">No. of<br>days</th>
+          <th rowspan="2" class="th-sig">Signature</th>
+        </tr>
+        <tr class="tr-daynames">
+          ${days.map(d => {
+            // Approximate day-of-week for May 2026 (day 1 = Friday)
+            const dow = ['FRI','SAT','SUN','MON','TUE','WED','THU']
+            return `<th class="th-dow ${['SAT','SUN'].includes(dow[(d-1)%7])?'th-weekend':''}">${dow[(d-1)%7]}</th>`
+          }).join('')}
+        </tr>
+      </thead>
+      <tbody>`
+
+  if (totalEmps === 0) {
+    // Show raw OCR text so user can see what was captured
+    const rawLines = (parsed.rawText || '').split('\n').filter(l => l.trim())
+    html += `<tr><td colspan="${days.length + 3}" class="td-empty">
+      <div style="text-align:left;padding:8px;">
+        <strong style="color:#c0392b;">⚠ Employee schedule rows could not be auto-extracted.</strong><br>
+        <small style="color:#888;">The OCR captured the following text — employee data may be present but in an unexpected format:</small>
+        <pre style="margin-top:8px;font-size:10px;background:#f8f9fa;padding:10px;border-radius:6px;max-height:200px;overflow-y:auto;white-space:pre-wrap;text-align:left;">${escHtml(rawLines.join('\n'))}</pre>
+      </div>
+    </td></tr>`
+  } else {
+    for (const group of parsed.groups) {
+      if (group.label) {
+        html += `<tr><td colspan="${days.length + 3}" class="td-group">${escHtml(group.label)}</td></tr>`
+      }
+      for (const emp of group.employees) {
+        html += `<tr><td class="td-name">${escHtml(emp.name)}</td>`
+        for (let d = 0; d < 31; d++) {
+          const code = emp.schedule[d] || ''
+          const cls  = code === '85' ? 'day-work' : code === 'H' ? 'day-holiday' : code === 'O' ? 'day-off' : ''
+          html += `<td class="td-day ${cls}">${escHtml(code)}</td>`
+        }
+        html += `<td class="td-days">${emp.numDays}</td>`
+        html += `<td class="td-sig"></td>`
+        html += `</tr>`
+      }
+    }
+  }
+
+  html += `</tbody></table></div>`
+
+  // Legend
+  if (Object.keys(parsed.legend).length) {
+    html += `<div class="sched-legend">
+      <strong>LEGEND:</strong>
+      ${Object.entries(parsed.legend).map(([k,v]) =>
+        `<span class="leg-item"><strong>${escHtml(k)}</strong> &nbsp;-&nbsp; ${escHtml(v)}</span>`
+      ).join('&emsp;')}
+    </div>`
+  }
+
+  // Signatories
+  html += `<div class="sched-sigs">
+    <div class="sig-col">
+      <div class="sig-label">Prepared by:</div>
+      <div class="sig-name">${escHtml(parsed.preparedBy)}</div>
+      <div class="sig-title">${escHtml(parsed.preparedByTitle)}</div>
+    </div>
+    <div class="sig-col">
+      <div class="sig-label">Approved by:</div>
+      <div class="sig-name">${escHtml(parsed.approvedBy)}</div>
+      <div class="sig-title">${escHtml(parsed.approvedByTitle)}</div>
+    </div>
+    <div class="sig-col">
+      <div class="sig-label">Noted by:</div>
+      <div class="sig-name">${escHtml(parsed.notedBy)}</div>
+      <div class="sig-title">${escHtml(parsed.notedByTitle)}</div>
+    </div>
+  </div>
+  </div>
+
+  <style>
+    .sched-doc { font-family: Arial, sans-serif; font-size: 11px; padding: 12px; background: #fff; }
+    .sched-header { text-align: center; margin-bottom: 12px; }
+    .sched-hosp { font-size: 13px; font-weight: 700; color: #1a3a5c; }
+    .sched-sub { font-size: 11px; color: #555; }
+    .sched-title { font-size: 12px; font-weight: 700; margin-top: 8px; text-decoration: underline; }
+    .sched-period { font-size: 12px; font-weight: 700; text-decoration: underline; }
+    .sched-dept-row { margin-bottom: 8px; font-size: 11px; }
+    .sched-table-wrap { overflow-x: auto; }
+    .sched-table { border-collapse: collapse; font-size: 9px; min-width: 100%; }
+    .sched-table th, .sched-table td { border: 1px solid #999; padding: 2px 3px; text-align: center; white-space: nowrap; }
+    .th-name, .td-name { text-align: left; min-width: 130px; max-width: 160px; font-weight: 600; background: #f8f9fa; white-space: normal; }
+    .th-day, .th-dow { min-width: 18px; max-width: 22px; font-size: 8px; background: #1a3a5c; color: #fff; }
+    .th-weekend { background: #c0392b; }
+    .th-days, .th-sig { background: #1a3a5c; color: #fff; min-width: 36px; font-size: 9px; }
+    .td-days { font-weight: 700; color: #1a3a5c; }
+    .td-sig { min-width: 60px; }
+    .td-group { background: #e8f0fe; font-weight: 700; color: #1a3a5c; text-align: left; padding: 3px 6px; font-size: 10px; }
+    .td-empty { text-align: center; color: #aaa; padding: 20px; font-size: 12px; }
+    .day-work { background: #eafaf1; color: #1a6b3c; font-weight: 700; }
+    .day-off { background: #f9f9f9; color: #bbb; }
+    .day-holiday { background: #fef3e2; color: #e67e22; font-weight: 700; }
+    .sched-legend { margin-top: 10px; font-size: 10px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .leg-item { background: #f8f9fa; border: 1px solid #ddd; padding: 2px 8px; border-radius: 4px; }
+    .sched-sigs { display: flex; gap: 40px; margin-top: 20px; flex-wrap: wrap; }
+    .sig-col { display: flex; flex-direction: column; gap: 2px; min-width: 160px; }
+    .sig-label { font-size: 10px; color: #888; }
+    .sig-name { font-size: 11px; font-weight: 700; color: #1a3a5c; border-bottom: 1px solid #333; padding-bottom: 2px; min-width: 140px; }
+    .sig-title { font-size: 10px; color: #555; }
+  </style>`
+
+  return html
+}
+
 // -- OCR text parser -----------------------------------------------------------
 function parseOCRText(text, docType) {
-  const lines  = text.split('\n').map(l => l.trim()).filter(Boolean)
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
+
+  // Schedule of Duties
+  if (/schedule of duties|schedule of duty/i.test(text) || docType === 'Schedule') {
+    const parsed = parseScheduleOfDuties(text, lines)
+    // Flatten groups into employees for extracted_data summary
+    const allEmps = parsed.groups.flatMap(g => g.employees)
+    return {
+      hospital:   parsed.hospital,
+      project:    parsed.project,
+      department: parsed.department,
+      period:     parsed.period,
+      employees:  allEmps.length,
+      employeeList: allEmps.map(e => `${e.name} (${e.numDays} days)`).join(', '),
+      preparedBy: parsed.preparedBy,
+      approvedBy: parsed.approvedBy,
+      notedBy:    parsed.notedBy,
+    }
+  }
+
+  // Generic
   const result = {}
   for (const line of lines) {
-    if (/name[:\s]/i.test(line))        result.employeeName  = line.replace(/.*name[:\s]*/i, '').trim()
-    if (/department[:\s]/i.test(line))  result.department    = line.replace(/.*department[:\s]*/i, '').trim()
-    if (/period[:\s]/i.test(line))      result.period        = line.replace(/.*period[:\s]*/i, '').trim()
-    if (/position[:\s]/i.test(line))    result.position      = line.replace(/.*position[:\s]*/i, '').trim()
-    if (/leave type[:\s]/i.test(line))  result.leaveType     = line.replace(/.*leave type[:\s]*/i, '').trim()
-    if (/total hours?[:\s]/i.test(line)) result.totalHours   = line.replace(/.*total hours?[:\s]*/i, '').trim()
-    if (/gross pay[:\s]/i.test(line))   result.grossPay      = line.replace(/.*gross pay[:\s]*/i, '').trim()
-    if (/net pay[:\s]/i.test(line))     result.netPay        = line.replace(/.*net pay[:\s]*/i, '').trim()
-    const dateMatch = line.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/)
-    if (dateMatch && !result.date)      result.date          = dateMatch[0]
+    if (/name[:\s]/i.test(line))         result.employeeName = line.replace(/.*name[:\s]*/i,'').trim()
+    if (/department[:\s]/i.test(line))   result.department   = line.replace(/.*department[:\s]*/i,'').trim()
+    if (/period[:\s]/i.test(line))       result.period       = line.replace(/.*period[:\s]*/i,'').trim()
+    if (/position[:\s]/i.test(line))     result.position     = line.replace(/.*position[:\s]*/i,'').trim()
+    if (/leave type[:\s]/i.test(line))   result.leaveType    = line.replace(/.*leave type[:\s]*/i,'').trim()
+    if (/total hours?[:\s]/i.test(line)) result.totalHours   = line.replace(/.*total hours?[:\s]*/i,'').trim()
+    if (/gross pay[:\s]/i.test(line))    result.grossPay     = line.replace(/.*gross pay[:\s]*/i,'').trim()
+    if (/net pay[:\s]/i.test(line))      result.netPay       = line.replace(/.*net pay[:\s]*/i,'').trim()
+    const dm = line.match(/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/)
+    if (dm && !result.date)              result.date         = dm[0]
   }
   if (!Object.keys(result).length) result.textPreview = text.substring(0, 300)
   return result
@@ -606,12 +922,6 @@ function docTypeColor(t) {
               <div v-else class="no-data">No data extracted. Try editing manually.</div>
             </template>
           </div>
-
-          <!-- Raw text -->
-          <details v-if="selectedScan.raw_text" class="raw-text-details">
-            <summary>Raw extracted text</summary>
-            <pre class="raw-text">{{ selectedScan.raw_text }}</pre>
-          </details>
 
           <!-- Actions -->
           <div class="preview-actions">

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import { useVersionHistory } from '@/composables/useVersionHistory'
 
 export const useLeaveStore = defineStore('leave', () => {
   const leaveRecords = ref([
@@ -52,24 +53,33 @@ export const useLeaveStore = defineStore('leave', () => {
 
   const nextId = ref(4)
 
-  const leaveTypes = [
-    'Vacation Leave', 'Sick Leave', 'Maternity Leave', 'Paternity Leave',
+  const leaveTypes = ['Vacation Leave', 'Sick Leave', 'Maternity Leave', 'Paternity Leave',
     'Special Privilege Leave', 'Forced Leave', 'Emergency Leave',
     'Study Leave', 'VAWC Leave',
   ]
 
   const statuses = ['Pending', 'Approved', 'Disapproved', 'Cancelled']
 
+  const { trackCreate, trackUpdate, trackDelete } = useVersionHistory()
+
   function addRecord(record) {
-    leaveRecords.value.push({ ...record, id: nextId.value++ })
+    const newRec = { ...record, id: nextId.value++ }
+    leaveRecords.value.push(newRec)
+    trackCreate('Leave', newRec, newRec.employeeName)
   }
 
   function updateRecord(id, data) {
     const idx = leaveRecords.value.findIndex(r => r.id === id)
-    if (idx !== -1) leaveRecords.value[idx] = { ...leaveRecords.value[idx], ...data }
+    if (idx !== -1) {
+      const old = { ...leaveRecords.value[idx] }
+      leaveRecords.value[idx] = { ...old, ...data }
+      trackUpdate('Leave', old, leaveRecords.value[idx], data.employeeName ?? old.employeeName)
+    }
   }
 
   function deleteRecord(id) {
+    const rec = leaveRecords.value.find(r => r.id === id)
+    if (rec) trackDelete('Leave', rec, rec.employeeName)
     leaveRecords.value = leaveRecords.value.filter(r => r.id !== id)
   }
 

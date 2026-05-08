@@ -1,10 +1,15 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useDTRStore } from '@/stores/dtr'
 import { useAuthStore } from '@/stores/auth'
+import { useEmployeeStore } from '@/stores/employees'
+import AppModal from '@/components/AppModal.vue'
 
-const store = useDTRStore()
-const auth = useAuthStore()
+const store    = useDTRStore()
+const auth     = useAuthStore()
+const empStore = useEmployeeStore()
+
+const DTR_API = 'http://localhost/hrs/server/api/dtr.php'
 
 const svgIcons = {
   search: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>`,
@@ -25,21 +30,31 @@ const filterStatus = ref('')
 const showForm = ref(false)
 const editId = ref(null)
 
-// DTR-specific history log
-const dtrHistory = ref([
-  { id: 1, timestamp: '2026-04-16 09:15', user: 'HR Admin', action: 'DTR Received', employeeNo: 'GEAMH-001', employeeName: 'Dela Cruz, Juan S.', period: 'April 1-15, 2026', type: 'Main', status: 'Received', remarks: '' },
-  { id: 2, timestamp: '2026-04-16 09:30', user: 'Thea Villanueva', action: 'DTR Submitted', employeeNo: 'GEAMH-002', employeeName: 'Reyes, Maria G.', period: 'April 1-15, 2026', type: 'Thea', status: 'Submitted', remarks: 'For verification' },
-  { id: 3, timestamp: '2026-04-10 08:00', user: 'HR Admin', action: 'DTR Verified', employeeNo: 'GEAMH-001', employeeName: 'Dela Cruz, Juan S.', period: 'March 16-31, 2026', type: 'Main', status: 'Verified', remarks: 'Verified by HR Officer' },
-  { id: 4, timestamp: '2026-04-10 08:30', user: 'Thea Villanueva', action: 'DTR Submitted', employeeNo: 'GEAMH-003', employeeName: 'Santos, Pedro L.', period: 'March 16-31, 2026', type: 'Thea', status: 'Received', remarks: '' },
-  { id: 5, timestamp: '2026-04-01 10:00', user: 'HR Admin', action: 'DTR Returned', employeeNo: 'GEAMH-004', employeeName: 'Bautista, Ana C.', period: 'March 1-15, 2026', type: 'Main', status: 'Returned', remarks: 'Missing signature' },
-])
+// DTR history — fetched from backend
+const dtrHistory    = ref([])
+const historyLoading = ref(false)
+
+async function fetchHistory() {
+  historyLoading.value = true
+  try {
+    const res  = await fetch(`${DTR_API}?history=1`)
+    if (!res.ok) throw new Error('Failed to fetch history')
+    dtrHistory.value = await res.json()
+  } catch (e) {
+    console.warn('DTR history fetch failed:', e.message)
+  } finally {
+    historyLoading.value = false
+  }
+}
+
+onMounted(fetchHistory)
 
 const historySearch = ref('')
 const historyFilterStatus = ref('')
 
 const filteredHistory = computed(() => dtrHistory.value.filter(h => {
   const q = historySearch.value.toLowerCase()
-  const matchSearch = !q || h.employeeName.toLowerCase().includes(q) || h.employeeNo.toLowerCase().includes(q)
+  const matchSearch = !q || (h.employee_name ?? '').toLowerCase().includes(q) || (h.employee_no ?? '').toLowerCase().includes(q)
   const matchStatus = !historyFilterStatus.value || h.status === historyFilterStatus.value
   return matchSearch && matchStatus
 }))
@@ -55,20 +70,47 @@ const blankForm = () => ({
 const form = ref(blankForm())
 const formErrors = ref({ employeeNo: '', employeeName: '' })
 
-function onEmployeeNoInput(e) {
-  e.target.value = e.target.value.replace(/[^0-9\-]/g, '')
-  form.value.employeeNo = e.target.value
+// ── Employee search combobox ──────────────────────────────────────────────────
+const empSearch   = ref('')
+const empDropOpen = ref(false)
+
+const filteredEmps = computed(() => {
+  const q = empSearch.value.toLowerCase().trim()
+  if (!q) return empStore.employees.slice(0, 50)
+  return empStore.employees.filter(e =>
+    e.lastName.toLowerCase().includes(q) ||
+    e.firstName.toLowerCase().includes(q) ||
+    e.employeeNo.toLowerCase().includes(q) ||
+    (e.department ?? '').toLowerCase().includes(q)
+  ).slice(0, 50)
+})
+
+function selectEmployee(emp) {
+  form.value.employeeNo   = emp.employeeNo
+  form.value.employeeName = `${emp.lastName}, ${emp.firstName}${emp.middleName ? ' ' + emp.middleName[0] + '.' : ''}`
+  form.value.department   = emp.department ?? ''
+  empSearch.value   = `${emp.lastName}, ${emp.firstName} (${emp.employeeNo})`
+  empDropOpen.value = false
+  formErrors.value.employeeNo   = ''
+  formErrors.value.employeeName = ''
 }
 
-function onEmployeeNameInput(e) {
-  e.target.value = e.target.value.replace(/[0-9]/g, '')
-  form.value.employeeName = e.target.value
+function onEmpBlur() {
+  setTimeout(() => { empDropOpen.value = false }, 180)
+}
+
+function clearEmployee() {
+  form.value.employeeNo   = ''
+  form.value.employeeName = ''
+  form.value.department   = ''
+  empSearch.value = ''
 }
 
 function openAdd() {
   editId.value = null
   form.value = blankForm()
   formErrors.value = { employeeNo: '', employeeName: '' }
+  empSearch.value = ''
   showForm.value = true
 }
 
@@ -76,61 +118,48 @@ function openEdit(rec) {
   editId.value = rec.id
   form.value = { ...rec }
   formErrors.value = { employeeNo: '', employeeName: '' }
+  empSearch.value = rec.employeeName ? `${rec.employeeName} (${rec.employeeNo})` : ''
   showForm.value = true
 }
 
 function save() {
   formErrors.value = { employeeNo: '', employeeName: '' }
   let valid = true
-  if (!form.value.employeeNo.trim()) {
-    formErrors.value.employeeNo = 'Employee No. is required and must contain numbers only.'; valid = false
-  }
-  if (!form.value.employeeName.trim()) {
-    formErrors.value.employeeName = 'Employee Name is required and must not contain numbers.'; valid = false
-  }
+  if (!form.value.employeeNo.trim()) { formErrors.value.employeeNo = 'Employee No. is required.'; valid = false }
+  if (!form.value.employeeName.trim()) { formErrors.value.employeeName = 'Employee Name is required.'; valid = false }
   if (!valid) return
+  showSaveModal.value = true
+}
+async function confirmSave() {
+  const payload = { ...form.value, processedBy: auth.currentUser?.name || 'System' }
   if (editId.value) {
-    store.updateRecord(editId.value, { ...form.value })
+    await store.updateRecord(editId.value, payload)
     auth.addLog('DTR Updated', 'DTR', `DTR of ${form.value.employeeName} (${form.value.period}) updated.`)
-    addHistory('DTR Updated', form.value)
   } else {
-    store.addRecord({ ...form.value })
+    await store.addRecord(payload)
     auth.addLog('DTR Added', 'DTR', `DTR of ${form.value.employeeName} (${form.value.period}) added.`)
-    addHistory('DTR Submitted', form.value)
   }
+  await fetchHistory()
+  showSaveModal.value = false
   showForm.value = false
 }
 
-function addHistory(action, rec) {
-  const d = new Date()
-  const mm = String(d.getMonth()+1).padStart(2,'0')
-  const dd = String(d.getDate()).padStart(2,'0')
-  const yyyy = d.getFullYear()
-  const hh = String(d.getHours()%12||12).padStart(2,'0')
-  const min = String(d.getMinutes()).padStart(2,'0')
-  const sec = String(d.getSeconds()).padStart(2,'0')
-  const ampm = d.getHours()<12?'AM':'PM'
-  const ts = `${mm}/${dd}/${yyyy}, ${hh}:${min}:${sec} ${ampm}`
-  dtrHistory.value.unshift({
-    id: Date.now(),
-    timestamp: ts,
-    user: auth.currentUser?.name || 'HR Admin',
-    action,
-    employeeNo: rec.employeeNo,
-    employeeName: rec.employeeName,
-    period: rec.period,
-    type: rec.transmittalType,
-    status: rec.status,
-    remarks: rec.remarks,
-  })
-}
+const showDeleteModal = ref(false)
+const showSaveModal   = ref(false)
+const deleteTarget    = ref(null)
 
 function deleteRec(id) {
-  const rec = store.dtrRecords.find(r => r.id === id)
-  if (confirm('Delete this DTR record?')) {
-    store.deleteRecord(id)
-    if (rec) auth.addLog('DTR Deleted', 'DTR', `DTR of ${rec.employeeName} deleted.`)
+  deleteTarget.value = store.dtrRecords.find(r => r.id === id)
+  showDeleteModal.value = true
+}
+async function confirmDelete() {
+  if (deleteTarget.value) {
+    await store.deleteRecord(deleteTarget.value.id, auth.currentUser?.name || 'System')
+    auth.addLog('DTR Deleted', 'DTR', `DTR of ${deleteTarget.value.employeeName} deleted.`)
+    await fetchHistory()
   }
+  showDeleteModal.value = false
+  deleteTarget.value = null
 }
 
 const filtered = computed(() => store.dtrRecords.filter(r => {
@@ -178,13 +207,13 @@ function printRecords() {
 function printHistory() {
   const rows = filteredHistory.value.map(h => `
     <tr>
-      <td>${h.timestamp}</td>
-      <td>${h.user}</td>
+      <td>${h.created_at}</td>
+      <td>${h.processed_by}</td>
       <td>${h.action}</td>
-      <td>${h.employeeNo}</td>
-      <td>${h.employeeName}</td>
+      <td>${h.employee_no}</td>
+      <td>${h.employee_name}</td>
       <td>${h.period}</td>
-      <td>${h.type}</td>
+      <td>${h.transmittal_type}</td>
       <td>${h.status}</td>
       <td>${h.remarks || '—'}</td>
     </tr>`).join('')
@@ -248,7 +277,8 @@ function downloadRecordsCSV() {
 function downloadHistoryCSV() {
   const headers = ['Timestamp','Processed By','Action','Emp No','Employee Name','Period','Type','Status','Remarks']
   const rows = filteredHistory.value.map(h => [
-    h.timestamp, h.user, h.action, h.employeeNo, h.employeeName, h.period, h.type, h.status, h.remarks || ''
+    h.created_at, h.processed_by, h.action, h.employee_no, h.employee_name,
+    h.period, h.transmittal_type, h.status, h.remarks || ''
   ])
   downloadCSV('DTR_History', headers, rows)
 }
@@ -419,15 +449,15 @@ function downloadCSV(filename, headers, rows) {
               <td colspan="9" class="empty-row">No history records found.</td>
             </tr>
             <tr v-for="h in filteredHistory" :key="h.id">
-              <td class="timestamp">{{ h.timestamp }}</td>
-              <td>{{ h.user }}</td>
+              <td class="timestamp">{{ h.created_at }}</td>
+              <td>{{ h.processed_by }}</td>
               <td><strong class="action-text">{{ h.action }}</strong></td>
-              <td><span class="emp-no">{{ h.employeeNo }}</span></td>
-              <td>{{ h.employeeName }}</td>
+              <td><span class="emp-no">{{ h.employee_no }}</span></td>
+              <td>{{ h.employee_name }}</td>
               <td>{{ h.period }}</td>
               <td>
-                <span class="badge" :class="h.type === 'Main' ? 'badge-blue' : 'badge-purple'">
-                  {{ h.type }}
+                <span class="badge" :class="h.transmittal_type === 'Main' ? 'badge-blue' : 'badge-purple'">
+                  {{ h.transmittal_type }}
                 </span>
               </td>
               <td><span class="badge" :class="statusClass(h.status)">{{ h.status }}</span></td>
@@ -449,19 +479,52 @@ function downloadCSV(filename, headers, rows) {
         </div>
         <div class="modal-body">
           <div class="form-grid">
+            <div class="form-group full">
+              <label>Employee</label>
+              <div class="emp-combobox">
+                <div class="emp-input-wrap">
+                  <input
+                    v-model="empSearch"
+                    class="emp-search-input"
+                    placeholder="Search by name, employee no, or department..."
+                    @focus="empDropOpen = true"
+                    @blur="onEmpBlur"
+                    autocomplete="off"
+                  />
+                  <button v-if="form.employeeNo" type="button" class="emp-clear-btn" @click="clearEmployee" title="Clear">✕</button>
+                </div>
+                <div v-if="empDropOpen" class="emp-dropdown">
+                  <div v-if="filteredEmps.length === 0" class="emp-option-empty">No employees found.</div>
+                  <div
+                    v-for="emp in filteredEmps"
+                    :key="emp.id"
+                    class="emp-option"
+                    @mousedown.prevent="selectEmployee(emp)"
+                  >
+                    <div class="emp-opt-avatar">{{ emp.firstName[0] }}{{ emp.lastName[0] }}</div>
+                    <div class="emp-opt-info">
+                      <span class="emp-opt-name">{{ emp.lastName }}, {{ emp.firstName }}</span>
+                      <span class="emp-opt-meta">{{ emp.employeeNo }} · {{ emp.department }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <span v-if="formErrors.employeeNo || formErrors.employeeName" class="field-error">
+                {{ formErrors.employeeNo || formErrors.employeeName }}
+              </span>
+            </div>
+            <!-- Read-only filled fields -->
             <div class="form-group">
               <label>Employee No.</label>
-              <input v-model="form.employeeNo" @input="onEmployeeNoInput" placeholder="Numbers only (e.g. 001 or GEAMH-001)" />
-              <span v-if="formErrors.employeeNo" class="field-error">{{ formErrors.employeeNo }}</span>
+              <input :value="form.employeeNo" readonly class="input-readonly" placeholder="Auto-filled" />
             </div>
             <div class="form-group">
               <label>Employee Name</label>
-              <input v-model="form.employeeName" @input="onEmployeeNameInput" placeholder="Letters only (e.g. Dela Cruz, Juan)" />
-              <span v-if="formErrors.employeeName" class="field-error">{{ formErrors.employeeName }}</span>
+              <input :value="form.employeeName" readonly class="input-readonly" placeholder="Auto-filled" />
             </div>
             <div class="form-group">
               <label>Department</label>
-              <input v-model="form.department" />
+              <input :value="form.department" readonly class="input-readonly" placeholder="Auto-filled" />
             </div>
             <div class="form-group">
               <label>Period</label>
@@ -509,6 +572,29 @@ function downloadCSV(filename, headers, rows) {
         </div>
       </div>
     </div>
+
+    <!-- Delete Confirmation -->
+    <AppModal
+      v-if="showDeleteModal"
+      type="delete"
+      title="Delete DTR Record"
+      message="Are you sure you want to delete this DTR record?"
+      :detail="deleteTarget?.employeeName + ' — ' + deleteTarget?.period"
+      @confirm="confirmDelete"
+      @cancel="showDeleteModal = false"
+    />
+
+    <!-- Save Confirmation -->
+    <AppModal
+      v-if="showSaveModal"
+      type="confirm"
+      :title="editId ? 'Update DTR Record' : 'Add DTR Record'"
+      :message="editId ? 'Save changes to this DTR record?' : 'Add this new DTR record?'"
+      :detail="form.employeeName + ' — ' + form.period"
+      :confirmLabel="editId ? 'Yes, Update' : 'Yes, Add'"
+      @confirm="confirmSave"
+      @cancel="showSaveModal = false"
+    />
   </div>
 </template>
 
@@ -590,4 +676,21 @@ function downloadCSV(filename, headers, rows) {
 .form-group input, .form-group select, .form-group textarea { padding: 8px 12px; border: 1px solid #ddd; border-radius: 6px; font-size: 13px; outline: none; }
 .form-group input:focus, .form-group select:focus { border-color: #1a6b3c; }
 .field-error { font-size: 11px; color: #c0392b; margin-top: 2px; }
+
+/* Employee combobox */
+.emp-combobox { position:relative; }
+.emp-input-wrap { position:relative; display:flex; align-items:center; }
+.emp-search-input { width:100%; padding:8px 32px 8px 12px; border:1px solid #ddd; border-radius:6px; font-size:13px; outline:none; box-sizing:border-box; }
+.emp-search-input:focus { border-color:#1a6b3c; }
+.emp-clear-btn { position:absolute; right:8px; background:none; border:none; cursor:pointer; color:#aaa; font-size:13px; line-height:1; padding:0; }
+.emp-clear-btn:hover { color:#e74c3c; }
+.emp-dropdown { position:absolute; top:calc(100% + 4px); left:0; right:0; background:#fff; border:1px solid #ddd; border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,0.12); z-index:200; max-height:220px; overflow-y:auto; }
+.emp-option { display:flex; align-items:center; gap:10px; padding:8px 12px; cursor:pointer; transition:background 0.15s; }
+.emp-option:hover { background:#f0f4f8; }
+.emp-opt-avatar { width:30px; height:30px; border-radius:50%; background:linear-gradient(135deg,#1a3a5c,#2980b9); color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; flex-shrink:0; }
+.emp-opt-info { display:flex; flex-direction:column; gap:1px; }
+.emp-opt-name { font-size:13px; font-weight:600; color:#1a1a2e; }
+.emp-opt-meta { font-size:11px; color:#888; }
+.emp-option-empty { padding:12px; text-align:center; color:#aaa; font-size:13px; }
+.input-readonly { background:#f8f9fa !important; color:#555; cursor:default; }
 </style>

@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { usePayrollStore } from '@/stores/payroll'
 import { useRouter } from 'vue-router'
+import AppModal from '@/components/AppModal.vue'
 
 const store = usePayrollStore()
 const router = useRouter()
@@ -57,8 +58,17 @@ function statusClass(s) {
 }
 
 function deleteRecord(id) {
-  if (confirm('Delete this payroll record?')) store.deleteRecord(id)
+  deleteTarget.value = store.payrollRecords.find(r => r.id === id)
+  showDeleteModal.value = true
 }
+function confirmDelete() {
+  if (deleteTarget.value) store.deleteRecord(deleteTarget.value.id)
+  showDeleteModal.value = false
+  deleteTarget.value = null
+}
+
+const showDeleteModal = ref(false)
+const deleteTarget    = ref(null)
 
 function sortIcon(col) {
   if (sortBy.value !== col) return '↕'
@@ -175,9 +185,17 @@ function sortIcon(col) {
         </tbody>
       </table>
     </div>
+    <AppModal
+      v-if="showDeleteModal"
+      type="delete"
+      title="Delete Payroll Record"
+      message="Are you sure you want to delete this payroll record?"
+      :detail="deleteTarget?.employeeName + ' — ' + deleteTarget?.periodLabel"
+      @confirm="confirmDelete"
+      @cancel="showDeleteModal = false"
+    />
   </div>
 </template>
-
 <style scoped>
 .icon-svg { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; }
 .icon-svg :deep(svg) { width:100%; height:100%; fill:currentColor; }

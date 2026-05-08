@@ -1,8 +1,10 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { useVersionHistory } from '@/composables/useVersionHistory'
 
 export const useEmployeeStore = defineStore('employees', () => {
   const employees = ref([])
+  const { trackCreate, trackUpdate, trackDelete } = useVersionHistory()
 
   // Departments loaded from DB via fetchDepartments() below
 
@@ -51,30 +53,30 @@ export const useEmployeeStore = defineStore('employees', () => {
       if (Array.isArray(rows) && rows.length > 0) {
         // Map snake_case DB columns back to camelCase for the frontend
         employees.value = rows.map(r => ({
-          id:               r.id,
-          employeeNo:       r.employee_no,
-          lastName:         r.last_name,
-          firstName:        r.first_name,
-          middleName:       r.middle_name       ?? '',
-          position:         r.position          ?? '',
-          designation:      r.designation       ?? '',
-          department:       r.department        ?? '',
+          id: r.id,
+          employeeNo: r.employee_no,
+          lastName: r.last_name,
+          firstName: r.first_name,
+          middleName: r.middle_name ?? '',
+          position: r.position ?? '',
+          designation: r.designation ?? '',
+          department: r.department ?? '',
           employmentStatus: r.employment_status ?? 'Casual',
-          dateHired:        r.date_hired        ?? '',
-          birthDate:        r.birth_date        ?? '',
-          age:              r.age               ?? 0,
-          gender:           r.gender            ?? '',
-          civilStatus:      r.civil_status      ?? '',
-          address:          r.address           ?? '',
-          contactNo:        r.contact_no        ?? '',
-          email:            r.email             ?? '',
-          salary:           Number(r.salary)    || 0,
-          sgStep:           r.sg_step           ?? '',
-          tin:              r.tin_number        ?? '',
-          sss:              r.sss_gsis_number   ?? '',
-          philhealth:       r.phil_number       ?? '',
-          pagibig:          r.pi_number         ?? '',
-          active:           r.active == 1,
+          dateHired: r.date_hired ?? '',
+          birthDate: r.birth_date ?? '',
+          age: r.age ?? 0,
+          gender: r.gender ?? '',
+          civilStatus: r.civil_status ?? '',
+          address: r.address ?? '',
+          contactNo: r.contact_no ?? '',
+          email: r.email ?? '',
+          salary: Number(r.salary) || 0,
+          sgStep: r.sg_step ?? '',
+          tin: r.tin_number ?? '',
+          sss: r.sss_gsis_number ?? '',
+          philhealth: r.phil_number ?? '',
+          pagibig: r.pi_number ?? '',
+          active: r.active == 1,
         }))
       }
     } catch (e) {
@@ -97,11 +99,13 @@ export const useEmployeeStore = defineStore('employees', () => {
     })
     const json = await res.json()
     if (!res.ok) throw new Error(json.error || 'Insert failed')
-    // Refresh from DB so the list is always in sync
     await fetchEmployees()
+    const created = employees.value.find(e => e.employeeNo === emp.employeeNo) ?? { ...emp, id: json.id }
+    trackCreate('Employee', created, `${emp.lastName}, ${emp.firstName}`)
   }
 
   async function updateEmployee(id, data) {
+    const oldRecord = employees.value.find(e => e.id === id)
     const res = await fetch(`${API}?id=${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
@@ -109,19 +113,21 @@ export const useEmployeeStore = defineStore('employees', () => {
     })
     const json = await res.json()
     if (!res.ok) throw new Error(json.error || 'Update failed')
-    // Refresh from DB so the list reflects the actual saved state
     await fetchEmployees()
+    const newRecord = employees.value.find(e => e.id === id) ?? { ...data, id }
+    trackUpdate('Employee', oldRecord, newRecord, `${data.lastName ?? oldRecord?.lastName}, ${data.firstName ?? oldRecord?.firstName}`)
   }
 
   async function deleteEmployee(id) {
+    const record = employees.value.find(e => e.id === id)
     try {
       const res = await fetch(`${API}?id=${id}`, { method: 'DELETE' })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Delete failed')
+      if (record) trackDelete('Employee', record, `${record.lastName}, ${record.firstName}`)
     } catch (e) {
       console.error('deleteEmployee error:', e.message)
     }
-    // Always remove from local state
     employees.value = employees.value.filter(e => e.id !== id)
   }
 

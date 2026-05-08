@@ -360,15 +360,6 @@ function onEmpBlur() { setTimeout(() => { empDropOpen.value = false }, 180) }
                 <strong>{{ p.last_name }}, {{ p.first_name }}</strong>
                 <span>{{ p.position || '—' }} · {{ p.department || '—' }}</span>
               </div>
-              <button
-                class="attend-btn"
-                :class="{ attended: p.attended }"
-                @click="toggleAttended(p)"
-                :title="p.attended ? 'Mark as not attended' : 'Mark as attended'"
-              >
-                <span class="icon-svg" v-html="icons.check"></span>
-                {{ p.attended ? 'Attended' : 'Absent' }}
-              </button>
               <button class="btn-icon danger sm" @click="removeParticipant(p)" title="Remove">
                 <span class="icon-svg" v-html="icons.delete"></span>
               </button>

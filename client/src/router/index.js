@@ -25,29 +25,29 @@ import UserManual from '@/views/admin/UserManual.vue'
 import DiosAccount from '@/views/admin/DiosAccount.vue'
 
 const routes = [
-  { path: '/login',               name: 'Login',               component: Login,               meta: { public: true } },
-  { path: '/signup',              name: 'Signup',              component: Signup,              meta: { public: true } },
-  { path: '/',                    name: 'Dashboard',           component: Dashboard },
-  { path: '/employees',           name: 'EmployeeMasterlist',  component: EmployeeMasterlist },
-  { path: '/employees/new',       name: 'EmployeeNew',         component: EmployeeForm },
-  { path: '/employees/:id/edit',  name: 'EmployeeEdit',        component: EmployeeForm },
-  { path: '/employees/birthdays', name: 'BirthdayCelebrants',  component: BirthdayCelebrants },
-  { path: '/dtr',                 name: 'DTRTransmittal',      component: DTRTransmittal },
-  { path: '/leave',               name: 'LeaveManagement',     component: LeaveManagement },
-  { path: '/to',                  name: 'TOManagement',        component: TOManagement },
-  { path: '/verification',        name: 'Verification',        component: Verification },
-  { path: '/tracking',            name: 'TrackingReceiving',   component: TrackingReceiving },
-  { path: '/signatories',         name: 'Signatories',         component: Signatories },
-  { path: '/audit',               name: 'AuditTransmittal',    component: AuditTransmittal },
-  { path: '/schedule',            name: 'ScheduleDatabase',    component: ScheduleDatabase },
-  { path: '/ai-scanning',         name: 'AIScanningTools',     component: AIScanningTools },
-  { path: '/accounts',            name: 'AccountManagement',   component: AccountManagement,   meta: { adminOrDios: true } },
-  { path: '/trainings',           name: 'TrainingsManagement', component: TrainingsManagement },
-  { path: '/departments',         name: 'DepartmentManagement',component: DepartmentManagement },
-  { path: '/audit-trail',         name: 'AuditHistory',        component: AuditHistory,        meta: { adminOrDios: true } },
-  { path: '/version-history',     name: 'VersionHistory',      component: VersionHistory,      meta: { adminOrDios: true } },
-  { path: '/user-manual',         name: 'UserManual',          component: UserManual },
-  { path: '/dios-account',        name: 'DiosAccount',         component: DiosAccount,         meta: { adminOrDios: true } },
+  { path: '/login', name: 'Login', component: Login, meta: { public: true } },
+  { path: '/signup', name: 'Signup', component: Signup, meta: { public: true, disabled: true } },
+  { path: '/', name: 'Dashboard', component: Dashboard },
+  { path: '/employees', name: 'EmployeeMasterlist', component: EmployeeMasterlist },
+  { path: '/employees/new', name: 'EmployeeNew', component: EmployeeForm },
+  { path: '/employees/:id/edit', name: 'EmployeeEdit', component: EmployeeForm },
+  { path: '/employees/birthdays', name: 'BirthdayCelebrants', component: BirthdayCelebrants },
+  { path: '/dtr', name: 'DTRTransmittal', component: DTRTransmittal },
+  { path: '/leave', name: 'LeaveManagement', component: LeaveManagement },
+  { path: '/to', name: 'TOManagement', component: TOManagement },
+  { path: '/verification', name: 'Verification', component: Verification },
+  { path: '/tracking', name: 'TrackingReceiving', component: TrackingReceiving },
+  { path: '/signatories', name: 'Signatories', component: Signatories },
+  { path: '/audit', name: 'AuditTransmittal', component: AuditTransmittal },
+  { path: '/schedule', name: 'ScheduleDatabase', component: ScheduleDatabase },
+  { path: '/ai-scanning', name: 'AIScanningTools', component: AIScanningTools },
+  { path: '/accounts', name: 'AccountManagement', component: AccountManagement, meta: { adminOrDios: true } },
+  { path: '/trainings', name: 'TrainingsManagement', component: TrainingsManagement },
+  { path: '/departments', name: 'DepartmentManagement', component: DepartmentManagement },
+  { path: '/audit-trail', name: 'AuditHistory', component: AuditHistory, meta: { adminOrDios: true } },
+  { path: '/version-history', name: 'VersionHistory', component: VersionHistory, meta: { adminOrDios: true } },
+  { path: '/user-manual', name: 'UserManual', component: UserManual },
+  { path: '/dios-account', name: 'DiosAccount', component: DiosAccount, meta: { adminOrDios: true } },
 ]
 
 const router = createRouter({
@@ -63,6 +63,10 @@ router.beforeEach((to, _from, next) => {
   }
   if (to.path === '/login' && auth.isLoggedIn) {
     return next('/')
+  }
+  // Signup is disabled — only DIOS can create accounts via Account Management
+  if (to.path === '/signup') {
+    return next(auth.isLoggedIn ? '/' : '/login')
   }
 
   // Section Admin cannot access write-only routes directly
