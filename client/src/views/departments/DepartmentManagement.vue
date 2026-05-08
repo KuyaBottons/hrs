@@ -135,7 +135,16 @@ async function confirmDelete() {
   }
 }
 
-// ── Toggle active status inline ──────────────────────────────────────────────
+// ── Employee count per department ─────────────────────────────────────────────
+const empCountByDept = computed(() => {
+  const counts = {}
+  for (const emp of empStore.employees) {
+    if (emp.department) {
+      counts[emp.department] = (counts[emp.department] || 0) + 1
+    }
+  }
+  return counts
+})
 async function toggleActive(dept) {
   try {
     await fetch(`${API}?id=${dept.id}`, {
@@ -183,6 +192,7 @@ async function toggleActive(dept) {
             <th>#</th>
             <th>Department Name</th>
             <th>Code</th>
+            <th>Employees</th>
             <th>Description</th>
             <th>Status</th>
             <th>Actions</th>
@@ -190,10 +200,10 @@ async function toggleActive(dept) {
         </thead>
         <tbody>
           <tr v-if="loading">
-            <td colspan="6" class="empty-row">Loading...</td>
+            <td colspan="7" class="empty-row">Loading...</td>
           </tr>
           <tr v-else-if="filtered.length === 0">
-            <td colspan="6" class="empty-row">No departments found.</td>
+            <td colspan="7" class="empty-row">No departments found.</td>
           </tr>
           <tr v-for="(dept, i) in filtered" :key="dept.id">
             <td class="num-col">{{ i + 1 }}</td>
@@ -204,6 +214,11 @@ async function toggleActive(dept) {
               </div>
             </td>
             <td><span class="code-badge">{{ dept.code || '—' }}</span></td>
+            <td>
+              <span class="emp-count-badge">
+                {{ empCountByDept[dept.name] || 0 }}
+              </span>
+            </td>
             <td class="desc-col">{{ dept.description || '—' }}</td>
             <td>
               <button
@@ -361,6 +376,13 @@ async function toggleActive(dept) {
   background: #e8f5ee; color: #1a6b3c;
   padding: 2px 10px; border-radius: 10px;
   font-size: 11px; font-weight: 700; font-family: monospace;
+}
+
+.emp-count-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  background: #ebf5fb; color: #2980b9;
+  padding: 3px 12px; border-radius: 12px;
+  font-size: 12px; font-weight: 700; min-width: 32px;
 }
 
 .status-toggle {

@@ -117,6 +117,12 @@ async function processFiles(files) {
           scan.status   = 'Review Needed'
           scan.raw_text = 'OCR failed. Try uploading the original digital file (Excel/PDF) for better results.'
         }
+      } else if (scan.raw_text) {
+        // Non-image file (CSV/XLSX/DOCX/PDF) — re-process raw_text through smart parser
+        // This gives proper schedule tables, formatted DOCX output, etc.
+        const smartHtml = buildOcrHtml(scan.raw_text)
+        if (smartHtml) scan.html_table = smartHtml
+        scan.extracted_data = parseOCRText(scan.raw_text, scan.doc_type)
       }
 
       pendingScans.value.unshift(scan)
@@ -244,8 +250,13 @@ async function preprocessImage(file) {
 function buildOcrHtml(text) {
   if (!text || !text.trim()) return ''
 
-  // Detect Schedule of Duties — render structured table
-  if (/schedule of duties|schedule of duty/i.test(text)) {
+  // Detect Schedule of Duties — from image OCR or CSV/XLSX raw text
+  // Triggers on: explicit header OR presence of schedule-like data (85/O/H codes + employee names)
+  const isSchedule = /schedule of duties|schedule of duty/i.test(text) ||
+    (/\b(GEAMH|KPFP|Electronic Medical|NAME OF EMPLOYEE)/i.test(text) &&
+     (text.match(/\b85\b/g) || []).length >= 3)
+
+  if (isSchedule) {
     const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
     return buildScheduleHtml(parseScheduleOfDuties(text, lines))
   }
@@ -349,64 +360,87 @@ function parseScheduleOfDuties(text, lines) {
   let currentGroup = { label: '', employees: [] }
   result.groups.push(currentGroup)
 
-  for (const line of lines) {
-    const trimmed = line.trim()
-    if (!trimmed || SKIP.test(trimmed)) continue
+  // ── Detect CSV/tab format ─────────────────────────────────────────────────
+  // CSV rows look like: "HERBERT C. LUGAY,H,O,85,85,85,85,85,O,..."
+  const isCSV = lines.some(l => (l.match(/,/g) || []).length >= 10)
 
-    // Group label — short all-caps word like KPFP or GEAMH
-    if (/^(KPFP|GEAMH|KP|GE|PHO|OPHO|MAB|DIALYSIS)$/i.test(trimmed)) {
-      currentGroup = { label: trimmed.toUpperCase(), employees: [] }
-      result.groups.push(currentGroup)
-      continue
+  if (isCSV) {
+    // Parse CSV-style schedule
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || SKIP.test(trimmed)) continue
+
+      // Split by comma or tab
+      const cols = trimmed.split(/[,\t]/).map(c => c.trim())
+      if (cols.length < 5) continue
+
+      const firstCol = cols[0]
+
+      // Group label
+      if (/^(KPFP|GEAMH|KP|GE|PHO|OPHO|MAB|DIALYSIS)$/i.test(firstCol)) {
+        currentGroup = { label: firstCol.toUpperCase(), employees: [] }
+        result.groups.push(currentGroup)
+        continue
+      }
+
+      // Employee row: first col is name, rest are day codes + numDays
+      if (!/^[A-Z][A-Za-z\s,\.]+$/.test(firstCol) || firstCol.length < 3) continue
+
+      const codes   = []
+      let   numDays = 0
+
+      for (let i = 1; i < cols.length; i++) {
+        const t = cols[i].toUpperCase().replace(/^0$/, 'O')
+        if (/^(85|O|H)$/.test(t)) {
+          codes.push(t)
+        } else if (/^\d{1,2}$/.test(cols[i])) {
+          const n = parseInt(cols[i])
+          if (n >= 1 && n <= 31) numDays = n
+        }
+      }
+
+      if (codes.length < 5) continue
+      if (!numDays) numDays = codes.filter(c => c === '85').length
+
+      while (codes.length < 31) codes.push('')
+      currentGroup.employees.push({ name: firstCol, schedule: codes.slice(0, 31), numDays })
     }
+  } else {
+    // ── OCR / space-separated format ─────────────────────────────────────────
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || SKIP.test(trimmed)) continue
 
-    // ── Aggressive employee row detection ──────────────────────────────────────
-    // OCR produces very noisy output for table cells. Strategy:
-    // 1. Find lines that start with a name-like string (letters, comma, period, space)
-    // 2. Count how many "85"-like patterns appear (even corrupted: 85, 851, 8S, 85], [85, etc.)
-    // 3. Count "O"-like patterns (O, 0, oo, [0], |0|, etc.)
+      if (/^(KPFP|GEAMH|KP|GE|PHO|OPHO|MAB|DIALYSIS)$/i.test(trimmed)) {
+        currentGroup = { label: trimmed.toUpperCase(), employees: [] }
+        result.groups.push(currentGroup)
+        continue
+      }
 
-    // Extract name: take leading word characters until we hit digits or brackets
-    const nameMatch = trimmed.match(/^([A-Z][A-Za-z\s,\.]+?)(?=\s+[\[\(0-9OHo]|\s{2,}|$)/)
-    if (!nameMatch) continue
-    const namePart = nameMatch[1].trim()
-    if (namePart.length < 3 || /^\d/.test(namePart)) continue
+      const nameMatch = trimmed.match(/^([A-Z][A-Za-z\s,\.]+?)(?=\s+[\[\(0-9OHo]|\s{2,}|$)/)
+      if (!nameMatch) continue
+      const namePart = nameMatch[1].trim()
+      if (namePart.length < 3 || /^\d/.test(namePart)) continue
 
-    const rest = trimmed.slice(namePart.length)
+      const rest = trimmed.slice(namePart.length)
+      const workMatches = (rest.match(/8[5S]/g) || []).length
+      const offMatches  = (rest.match(/\b[Oo0]{1,2}\b|\[0\]|\|0\|/g) || []).length
+      const holMatches  = (rest.match(/\bH\b/g) || []).length
+      if (workMatches + offMatches + holMatches < 5) continue
 
-    // Count work days: any occurrence of "85" (even inside brackets/noise)
-    const workMatches  = (rest.match(/8[5S]/g) || []).length
-    // Count off days: O, 0, [0], |0|, oo patterns
-    const offMatches   = (rest.match(/\b[Oo0]{1,2}\b|\[0\]|\|0\|/g) || []).length
-    // Count holiday: H
-    const holMatches   = (rest.match(/\bH\b/g) || []).length
+      const numMatch = rest.match(/\b([12]?\d)\b(?=[^0-9]*$)/)
+      const numDays  = numMatch ? parseInt(numMatch[1]) : workMatches
 
-    const totalCodes = workMatches + offMatches + holMatches
-    if (totalCodes < 5) continue
-
-    // Extract number of days — last standalone number 1-31 in the line
-    const numMatch = rest.match(/\b([12]?\d)\b(?=[^0-9]*$)/)
-    const numDays  = numMatch ? parseInt(numMatch[1]) : workMatches
-
-    // Build schedule array: reconstruct from rest token by token
-    const codes = []
-    // Tokenize rest, normalize each token
-    const restTokens = rest.split(/[\s\[\]\(\)\|,\/\\]+/).filter(Boolean)
-    for (const tok of restTokens) {
-      const t = tok.toUpperCase()
-      if (/^8[5S]$/.test(t))       codes.push('85')
-      else if (/^[Oo0]{1,2}$/.test(t)) codes.push('O')
-      else if (/^H$/.test(t))       codes.push('H')
+      const codes = []
+      for (const tok of rest.split(/[\s\[\]\(\)\|,\/\\]+/).filter(Boolean)) {
+        const t = tok.toUpperCase()
+        if (/^8[5S]$/.test(t))           codes.push('85')
+        else if (/^[Oo0]{1,2}$/.test(t)) codes.push('O')
+        else if (/^H$/.test(t))           codes.push('H')
+      }
+      while (codes.length < 31) codes.push('')
+      currentGroup.employees.push({ name: namePart, schedule: codes.slice(0, 31), numDays: numDays || workMatches })
     }
-
-    // Pad or trim to 31
-    while (codes.length < 31) codes.push('')
-
-    currentGroup.employees.push({
-      name:     namePart,
-      schedule: codes.slice(0, 31),
-      numDays:  numDays || workMatches,
-    })
   }
 
   // Remove empty groups
@@ -556,8 +590,12 @@ function buildScheduleHtml(parsed) {
 function parseOCRText(text, docType) {
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean)
 
-  // Schedule of Duties
-  if (/schedule of duties|schedule of duty/i.test(text) || docType === 'Schedule') {
+  // Schedule of Duties — detect from keyword, doc type, or CSV schedule pattern
+  const isScheduleText = /schedule of duties|schedule of duty/i.test(text) ||
+    docType === 'Schedule' ||
+    (/\b(GEAMH|KPFP|NAME OF EMPLOYEE)/i.test(text) && (text.match(/\b85\b/g) || []).length >= 3)
+
+  if (isScheduleText) {
     const parsed = parseScheduleOfDuties(text, lines)
     // Flatten groups into employees for extracted_data summary
     const allEmps = parsed.groups.flatMap(g => g.employees)
@@ -602,6 +640,158 @@ function openPreview(scan) {
 function closePreview() {
   showPreview.value = false
   editMode.value    = false
+}
+
+// ── Encode to Module ──────────────────────────────────────────────────────────
+const BASE_API = 'http://localhost/hrs/server/api'
+
+const encodeDestination = ref('')
+const encoding          = ref(false)
+const encodeResult      = ref(null)  // { success, message, count }
+
+const ENCODE_DESTINATIONS = [
+  { value: '',          label: 'Select destination...' },
+  { value: 'employees', label: '👤 Employee Masterlist' },
+  { value: 'birthdays', label: '🎂 Birthday Celebrants' },
+  { value: 'schedule',  label: '📅 Schedule Database' },
+]
+
+async function encodeToModule() {
+  if (!encodeDestination.value || !selectedScan.value) return
+  encoding.value     = true
+  encodeResult.value = null
+  try {
+    const scan = selectedScan.value
+    let count  = 0
+    if (encodeDestination.value === 'employees') count = await encodeEmployees(scan)
+    else if (encodeDestination.value === 'birthdays') count = await encodeBirthdays(scan)
+    else if (encodeDestination.value === 'schedule')  count = await encodeSchedule(scan)
+    const label = ENCODE_DESTINATIONS.find(d => d.value === encodeDestination.value)?.label
+    encodeResult.value = { success: true, message: `Successfully encoded ${count} record(s) to ${label}.` }
+  } catch (e) {
+    encodeResult.value = { success: false, message: e.message }
+  } finally {
+    encoding.value = false
+  }
+}
+
+async function encodeEmployees(scan) {
+  const records = buildEmployeeRecords(scan)
+  if (!records.length) throw new Error('No employee data could be extracted from this scan.')
+  let count = 0
+  for (const rec of records) {
+    const res  = await fetch(`${BASE_API}/employees.php`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.error || `Failed to insert ${rec.lastName}`)
+    count++
+  }
+  return count
+}
+
+async function encodeBirthdays(scan) {
+  const records = buildEmployeeRecords(scan).filter(r => r.birthDate)
+  if (!records.length) throw new Error('No birth date data found in this scan.')
+  let count = 0
+  for (const rec of records) {
+    const res  = await fetch(`${BASE_API}/employees.php`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.error || `Failed to insert ${rec.lastName}`)
+    count++
+  }
+  return count
+}
+
+async function encodeSchedule(scan) {
+  const records = buildScheduleRecords(scan)
+  if (!records.length) throw new Error('No schedule data could be extracted from this scan.')
+  let count = 0
+  for (const rec of records) {
+    const res  = await fetch(`${BASE_API}/schedule.php`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(rec),
+    })
+    const json = await res.json()
+    if (!res.ok) throw new Error(json.error || `Failed to insert schedule for ${rec.employeeName}`)
+    count++
+  }
+  return count
+}
+
+// ── Build employee records from extracted data ────────────────────────────────
+function buildEmployeeRecords(scan) {
+  const records = []
+  const d = scan.extracted_data || {}
+
+  // From structured extracted_data fields
+  if (d.employeeName || d.lastName) {
+    const parts = parseFullName(d.employeeName || `${d.lastName || ''}, ${d.firstName || ''}`)
+    records.push({
+      employeeNo: d.employeeNo || '', lastName: parts.lastName, firstName: parts.firstName,
+      middleName: parts.middleName || '', position: d.position || '', department: d.department || '',
+      employmentStatus: d.employmentStatus || 'Casual', dateHired: d.dateHired || '',
+      birthDate: d.birthDate || '', gender: d.gender || '', salary: parseFloat(d.salary || 0) || 0, active: 1,
+    })
+  }
+
+  // From schedule employeeList (e.g. "DELA CRUZ, JUAN (20 days), REYES, MARIA (20 days)")
+  if (d.employeeList) {
+    for (const entry of d.employeeList.split(',').map(s => s.replace(/\(\d+ days?\)/i,'').trim()).filter(Boolean)) {
+      const parts = parseFullName(entry)
+      if (parts.lastName) records.push({
+        employeeNo: '', lastName: parts.lastName, firstName: parts.firstName,
+        middleName: parts.middleName || '', position: '', department: d.department || '',
+        employmentStatus: 'Casual', dateHired: '', birthDate: '', gender: '', salary: 0, active: 1,
+      })
+    }
+  }
+
+  return records
+}
+
+// ── Build schedule records from extracted data ────────────────────────────────
+function buildScheduleRecords(scan) {
+  const records = []
+  const d = scan.extracted_data || {}
+
+  // Parse period → effective/end dates
+  const pm = (d.period || '').match(/(\w+)\s+(\d{1,2})[–\-](\d{1,2}),?\s*(\d{4})/)
+  const effectiveDate = pm ? `${pm[4]}-${monthNum(pm[1])}-${pm[2].padStart(2,'0')}` : ''
+  const endDate       = pm ? `${pm[4]}-${monthNum(pm[1])}-${pm[3].padStart(2,'0')}` : ''
+
+  if (d.employeeList) {
+    for (const entry of d.employeeList.split(',').map(s => s.trim()).filter(Boolean)) {
+      const nameMatch = entry.match(/^(.+?)\s*\((\d+)\s*days?\)/i)
+      const name = nameMatch ? nameMatch[1].trim() : entry
+      if (!name) continue
+      records.push({
+        employeeNo: '', employeeName: name, department: d.department || '',
+        shift: 'Morning', shiftTime: '8:00 AM - 5:00 PM',
+        days: ['Mon','Tue','Wed','Thu','Fri'],
+        effectiveDate, endDate, restDay: 'Saturday, Sunday',
+      })
+    }
+  }
+
+  return records
+}
+
+function parseFullName(fullName) {
+  if (!fullName) return { lastName: '', firstName: '', middleName: '' }
+  if (fullName.includes(',')) {
+    const [last, rest] = fullName.split(',').map(s => s.trim())
+    const parts = (rest || '').split(/\s+/)
+    return { lastName: last, firstName: parts[0] || '', middleName: parts.slice(1).join(' ') }
+  }
+  const parts = fullName.trim().split(/\s+/)
+  return { lastName: parts[parts.length-1] || '', firstName: parts[0] || '', middleName: parts.slice(1,-1).join(' ') }
+}
+
+function monthNum(m) {
+  return { january:'01',february:'02',march:'03',april:'04',may:'05',june:'06',
+           july:'07',august:'08',september:'09',october:'10',november:'11',december:'12' }[m?.toLowerCase()] || '01'
 }
 
 // -- Save to DB ----------------------------------------------------------------
@@ -929,10 +1119,32 @@ function docTypeColor(t) {
               <span v-html="icons.save"></span>
               {{ saving ? 'Saving...' : 'Save to System' }}
             </button>
-            <span v-else class="saved-badge">? Saved to database</span>
-            <button class="btn btn-export-excel" @click="exportToExcel(selectedScan)">? Export Excel</button>
-            <button class="btn btn-export-word" @click="exportToWord(selectedScan)">? Export Word</button>
+            <span v-else class="saved-badge">✅ Saved to database</span>
+            <button class="btn btn-export-excel" @click="exportToExcel(selectedScan)">📊 Export Excel</button>
+            <button class="btn btn-export-word" @click="exportToWord(selectedScan)">📄 Export Word</button>
             <button class="btn btn-secondary" @click="closePreview">Close</button>
+          </div>
+
+          <!-- Encode to Module -->
+          <div class="encode-section">
+            <div class="encode-title">
+              <span>⚡</span>
+              <strong>Encode to Module</strong>
+              <span class="encode-hint">Auto-send extracted data into a module</span>
+            </div>
+            <div class="encode-row">
+              <select v-model="encodeDestination" class="encode-select">
+                <option v-for="d in ENCODE_DESTINATIONS" :key="d.value" :value="d.value">{{ d.label }}</option>
+              </select>
+              <button class="btn-encode" :disabled="!encodeDestination || encoding" @click="encodeToModule">
+                <span v-if="encoding" class="spin-icon" v-html="icons.spinner"></span>
+                <span v-else>🚀</span>
+                {{ encoding ? 'Encoding...' : 'Encode Now' }}
+              </button>
+            </div>
+            <div v-if="encodeResult" class="encode-result" :class="encodeResult.success ? 'enc-ok' : 'enc-err'">
+              {{ encodeResult.success ? '✅' : '❌' }} {{ encodeResult.message }}
+            </div>
           </div>
         </div>
       </div>
@@ -1181,4 +1393,38 @@ function docTypeColor(t) {
 .empty-icon { width: 48px; height: 48px; }
 .empty-icon :deep(svg) { width: 48px; height: 48px; fill: #ccc; }
 .empty-preview p { font-size: 14px; margin: 0; }
+
+/* Encode to Module */
+.encode-section {
+  margin: 0 18px 16px;
+  background: linear-gradient(135deg, #f0f9f4, #e8f5ee);
+  border: 1px solid #a9dfbf;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.encode-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.encode-title strong { font-size: 13px; color: #1a6b3c; }
+.encode-hint { font-size: 11px; color: #888; }
+.encode-row { display: flex; gap: 8px; align-items: center; }
+.encode-select {
+  flex: 1; padding: 8px 12px; border: 1px solid #a9dfbf;
+  border-radius: 8px; font-size: 13px; outline: none;
+  background: #fff; cursor: pointer;
+}
+.encode-select:focus { border-color: #1a6b3c; }
+.btn-encode {
+  padding: 8px 18px; border-radius: 8px; border: none;
+  background: #1a6b3c; color: #fff; font-size: 13px; font-weight: 600;
+  cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+  white-space: nowrap; transition: background 0.2s;
+}
+.btn-encode:hover:not(:disabled) { background: #27ae60; }
+.btn-encode:disabled { background: #a0c4b0; cursor: not-allowed; }
+.encode-result {
+  font-size: 12px; font-weight: 600;
+  padding: 8px 12px; border-radius: 6px;
+}
+.enc-ok  { background: #eafaf1; color: #1a6b3c; border: 1px solid #a9dfbf; }
+.enc-err { background: #fdecea; color: #c0392b; border: 1px solid #f5b7b1; }
 </style>

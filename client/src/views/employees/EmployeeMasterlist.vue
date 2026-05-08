@@ -7,11 +7,11 @@ import AppSelect from '@/components/AppSelect.vue'
 const router = useRouter()
 const store  = useEmployeeStore()
 
-const search       = ref('')
-const filterDept   = ref('')
-const filterStatus = ref('')
-const filterGender = ref('')
-const filterGroup  = ref('')
+const search         = ref('')
+const filterService  = ref('')
+const filterStatus   = ref('')
+const filterGender   = ref('')
+const filterGroup    = ref('')
 const sortBy       = ref('lastName')
 const sortDir      = ref('asc')
 function resetPage() {}
@@ -65,12 +65,18 @@ function toggleSort(col) {
 const filtered = computed(() => {
   let list = store.employees.filter(e => {
     const q = search.value.toLowerCase()
-    const matchSearch = !q || e.lastName.toLowerCase().includes(q) || e.firstName.toLowerCase().includes(q) || e.employeeNo.toLowerCase().includes(q) || e.position.toLowerCase().includes(q)
-    const matchDept   = !filterDept.value   || e.department === filterDept.value
-    const matchStatus = !filterStatus.value || e.employmentStatus === filterStatus.value
-    const matchGender = !filterGender.value || e.gender === filterGender.value
-    const matchGroup  = !filterGroup.value  || e.employeeNo.toUpperCase().startsWith(filterGroup.value)
-    return matchSearch && matchDept && matchStatus && matchGender && matchGroup
+    const matchSearch   = !q || e.lastName.toLowerCase().includes(q) || e.firstName.toLowerCase().includes(q) || e.employeeNo.toLowerCase().includes(q) || e.position.toLowerCase().includes(q)
+    const matchStatus   = !filterStatus.value || e.employmentStatus === filterStatus.value
+    const matchGender   = !filterGender.value || e.gender === filterGender.value
+    const matchGroup    = !filterGroup.value  || e.employeeNo.toUpperCase().startsWith(filterGroup.value)
+    const matchService  = (() => {
+      if (!filterService.value) return true
+      const years = getYearsOfService(e.dateHired)
+      if (filterService.value === '5')  return years >= 5  && years < 10
+      if (filterService.value === '10') return years >= 10
+      return true
+    })()
+    return matchSearch && matchStatus && matchGender && matchGroup && matchService
   })
   list = [...list].sort((a, b) => {
     let va = a[sortBy.value] ?? '', vb = b[sortBy.value] ?? ''
@@ -90,6 +96,15 @@ function getAge(birthDate) {
   const m = today.getMonth() - bd.getMonth()
   if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) age--
   return age
+}
+
+function getYearsOfService(dateHired) {
+  if (!dateHired) return 0
+  const today = new Date(), hired = new Date(dateHired)
+  let years = today.getFullYear() - hired.getFullYear()
+  const m = today.getMonth() - hired.getMonth()
+  if (m < 0 || (m === 0 && today.getDate() < hired.getDate())) years--
+  return Math.max(0, years)
 }
 
 function statusClass(status) {
@@ -112,7 +127,7 @@ function sortIcon(col) {
           <span class="icon-svg search-icon" v-html="svgIcons.search"></span>
           <input v-model="search" class="search-input" placeholder="Search by name, ID, position..." />
         </div>
-        <AppSelect v-model="filterDept"   :options="[{ label: 'All Departments', value: '' }, ...store.departments.map(d => ({ label: d, value: d }))]" placeholder="All Departments" @update:modelValue="resetPage" />
+        <AppSelect v-model="filterService" :options="[{ label: 'All Service Years', value: '' }, { label: '5–9 Years', value: '5' }, { label: '10+ Years', value: '10' }]" placeholder="All Service Years" @update:modelValue="resetPage" />
         <AppSelect v-model="filterStatus" :options="[{ label: 'All Status', value: '' }, ...store.employmentStatuses.map(s => ({ label: s, value: s }))]" placeholder="All Status" @update:modelValue="resetPage" />
         <AppSelect v-model="filterGender" :options="[{ label: 'All Gender', value: '' }, { label: 'Male', value: 'Male' }, { label: 'Female', value: 'Female' }]" placeholder="All Gender" @update:modelValue="resetPage" />
         <AppSelect v-model="filterGroup"  :options="[{ label: 'All Groups', value: '' }, { label: 'KP', value: 'KP' }, { label: 'GEAMH', value: 'GEAMH' }]" placeholder="All Groups" @update:modelValue="resetPage" />
@@ -145,7 +160,7 @@ function sortIcon(col) {
             <tr v-if="filtered.length === 0">
               <td colspan="7" class="empty-row">No records found.</td>
             </tr>
-            <tr v-for="emp in filtered" :key="emp.id" :class="{ 'row-active': historyTarget?.id === emp.id }">
+            <tr v-for="emp in filtered" :key="emp.id">
               <td><span class="emp-no">{{ emp.employeeNo }}</span></td>
               <td>
                 <div class="emp-name-cell">
